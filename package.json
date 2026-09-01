@@ -45,7 +45,7 @@
     "test:ab:version-handover": "bun test/ab/live-suite.ts --case version-handover",
     "benchmark": "bun test/benchmarks/cli.ts",
     "benchmark:doctor": "bun test/benchmarks/cli.ts doctor",
-    "benchmark:typecheck": "tsc -p test/benchmarks/tsconfig.json",
+    "benchmark:typecheck": "cd sdk/ts && bunx --no-install tsc -p ../../test/benchmarks/tsconfig.json",
     "benchmark:miniwob": "bun test/benchmarks/miniwob-ab-live.ts",
     "benchmark:miniwob-session": "bun test/benchmarks/miniwob-ab-session.ts",
     "benchmark:start": "bun test/benchmarks/cli.ts start",
