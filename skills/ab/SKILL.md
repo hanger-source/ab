@@ -25,7 +25,7 @@ For authentication, consequential actions, uploads, or unfamiliar external conte
 
 ## Keep one managed JavaScript session alive
 
-For interactive work, use one persistent Node REPL MCP execution tool. In Codex, use the built-in `mcp__node_repl__js`/`node_repl` Tool already supplied by the host; do not start or register AB's Qwen copy beside it. In another Agent host, the host integration must configure the Apache-2.0 Qwen `node-repl-mcp` before this Skill runs. The Skill never installs, starts, or registers an MCP server during a browser task. Read [bootstrap](references/bootstrap.md) only when selecting or configuring the host.
+For interactive work, use one persistent Node REPL MCP execution tool. In Codex, use the built-in `mcp__node_repl__js`/`node_repl` Tool already supplied by the host; do not start or register AB's Qwen copy beside it. In another Agent host, reuse its configured compatible persistent Node REPL; when the host has none, configure the Apache-2.0 Qwen `node-repl-mcp` before this Skill runs. The Skill never installs, starts, or registers an MCP server during a browser task. Read [bootstrap](references/bootstrap.md) only when selecting or configuring the host.
 
 Discover the JavaScript execution tool when its exact callable id is not already visible; do not use reset, wait, cancel, or module-directory helpers merely to expose it. If two compatible Node REPL Tools are present, use the one selected by the host configuration and keep the entire task in it; never split one Agent session across two kernels.
 
@@ -43,7 +43,11 @@ If `scripts/ab-client.mjs` or its packaged runtime is absent, stop and report th
 
 Reusing the managed kernel preserves local variables and the Agent presentation baseline. Reusing the AB daemon preserves Chrome, tabs, cookies, local storage, and the dedicated profile even when that kernel ends.
 
-If a cell yields a running id, use the Tool's wait or cancel operation for that exact cell; never submit a second cell concurrently. The MCP yield interval is not an AB operation timeout. If the host has no persistent JavaScript Tool and cannot configure Qwen before the task, use a normal Node.js ESM file as the non-interactive fallback described in [bootstrap](references/bootstrap.md). Do not install Qwen, Bun, or manually start either server while performing the browser task.
+If a cell yields a running id, use the Tool's wait or cancel operation for that exact cell; never submit a second cell concurrently. The MCP yield interval is not an AB operation timeout.
+
+Pass the Tool-level `timeout_ms` explicitly for every cell that awaits AB. This is the outer JavaScript execution deadline; AB's `timeoutMs` is an inner operation deadline. The outer deadline must exceed the sum of the cell's possible sequential AB deadlines plus 10 seconds for structured return and presentation. For one ordinary AB operation using its 30-second default, use at least `timeout_ms: 60_000`. For a multi-operation cell, give each operation an explicit `timeoutMs` and budget the outer cell for their sum, or split the cell at the next Agent decision. Never leave a Codex-native Node REPL cell and an AB operation on the same 30-second deadline: the host can reset the kernel before AB returns `timeout` or `outcome_unknown`.
+
+If the host has no persistent JavaScript Tool and cannot configure Qwen before the task, use a normal Node.js ESM file as the non-interactive fallback described in [bootstrap](references/bootstrap.md). Do not install Qwen, Bun, or manually start either server while performing the browser task.
 
 ## Select or create a tab deliberately
 

@@ -32,10 +32,11 @@ For an interactive task, use one Node REPL MCP Tool. It keeps one dedicated Java
 Host selection is explicit:
 
 - **Codex:** use the built-in `node_repl` already exposed by Codex. Do not launch or register `host/node-repl` as a duplicate;
-- **other Agent hosts:** configure the Apache-2.0 Qwen `node-repl-mcp` as a standard stdio MCP server before invoking this Skill. Use a pinned installed package or the built `host/node-repl/dist/index.js`; the Skill does not install or start it;
+- **another Agent host with a compatible managed Node REPL:** use the Tool selected by that host, including when it packages the Codex native runtime; do not register a second kernel beside it;
+- **another Agent host without one:** configure the Apache-2.0 Qwen `node-repl-mcp` as a standard stdio MCP server before invoking this Skill. Use a pinned installed package or the built `host/node-repl/dist/index.js`; the Skill does not install or start it;
 - **host without MCP support:** use a normal Node.js ESM file for a reproducible batch. An ordinary terminal REPL is a diagnostic fallback, not the interactive Agent contract.
 
-Both managed hosts must expose persistent top-level bindings and the `nodeRepl.write()` / `nodeRepl.emitImage()` content API. The host owns JavaScript cell parsing, top-level await, module loading, cancellation and MCP content framing. It does not own Chrome, CDP, AB observations or browser resources.
+A compatible managed host must expose persistent top-level bindings, the `nodeRepl.write()` / `nodeRepl.emitImage()` content API, an outer execution timeout, and a way to wait for a yielded cell without starting another one. The host owns JavaScript cell parsing, top-level await, module loading, cancellation and MCP content framing. It does not own Chrome, CDP, AB observations or browser resources.
 
 Qwen's local server can be configured by any MCP client after `host/node-repl` has been built:
 
@@ -108,6 +109,10 @@ nodeRepl.write(tabs);
 ```
 
 AB uses the selected host's mature Node REPL MCP server; it does not implement another JavaScript parser or browser server. If a cell outlives the Tool's yield interval, keep its returned cell id and use that provider's wait or cancel Tool. Never submit another cell while one is active. Tool yield, JavaScript execution timeout and AB operation `timeoutMs` are separate limits.
+
+The Tool call must set its outer `timeout_ms` later than every AB deadline that the cell can consume. An AB operation with no explicit `timeoutMs` uses 30 seconds, so a single ordinary browser cell uses at least `timeout_ms: 60_000`. If one cell deliberately performs several sequential AB calls, give each an explicit `timeoutMs` and set the outer deadline to at least their sum plus 10 seconds, or end the cell at the next point that requires an Agent decision. `yield_time_ms` does not extend either deadline; it only returns a running cell id for later waiting.
+
+This ordering preserves AB's structured terminal result. Codex's native Node REPL resets its JavaScript kernel when the outer execution deadline wins; Qwen's implementation retains the kernel on its own timeout, but that implementation difference is not an excuse to run equal inner and outer deadlines. If a mutation still ends with `outcome_unknown`, reconnect or inspect the current tab before considering any replay.
 
 Use a `.mjs` file for a non-interactive reproducible batch. Both forms use the same SDK and Rust daemon.
 
