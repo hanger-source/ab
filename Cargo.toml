@@ -1,0 +1,25 @@
+[workspace]
+members = [
+  "server/rust/ab-protocol",
+  "server/rust/ab-runtime",
+  "server/rust/agent-browser/cli",
+]
+resolver = "2"
+
+[workspace.package]
+authors = ["hanger"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/hanger-source/ab"
+version = "0.3.0-alpha.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.ci]
+inherits = "release"
+lto = "thin"
+codegen-units = 16

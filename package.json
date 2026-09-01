@@ -1,0 +1,65 @@
+{
+  "name": "ab-workspace",
+  "private": true,
+  "version": "0.3.0-alpha.1",
+  "author": "hanger",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanger-source/ab.git"
+  },
+  "homepage": "https://github.com/hanger-source/ab#readme",
+  "bugs": {
+    "url": "https://github.com/hanger-source/ab/issues"
+  },
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "host/node-repl",
+    "sdk/ts",
+    "sdk/native/*"
+  ],
+  "scripts": {
+    "docs:sync": "bun scripts/sync-agent-docs.mjs",
+    "docs:check": "bun scripts/sync-agent-docs.mjs --check",
+    "protocol:generate": "cargo run -p ab-protocol --bin generate-ab-protocol -- .",
+    "protocol:check": "cargo run -p ab-protocol --bin generate-ab-protocol -- . --check",
+    "build:runtime": "cargo build -p ab-runtime",
+    "build:host": "cd host/node-repl && bun run build",
+    "package:runtime": "cargo build --release -p ab-runtime && bun scripts/package-native.mjs",
+    "build:sdk": "cd sdk/ts && bun run build && cd ../.. && bun run package:sdk",
+    "package:sdk": "bun scripts/package-sdk.mjs",
+    "package:skill": "bun scripts/package-skill.mjs",
+    "package:check": "cd sdk/native/darwin-arm64 && npm pack --dry-run && cd ../../ts && npm pack --dry-run",
+    "build": "bun run docs:sync && bun run protocol:generate && bun run build:host && bun run package:runtime && bun run build:sdk && bun run package:skill",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:check": "node scripts/check-release-identity.mjs",
+    "typecheck": "cd sdk/ts && bun run typecheck",
+    "check:rust": "cargo check --workspace --all-targets",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "test:rust": "cargo test --workspace",
+    "test:runtime": "cargo test -p ab-runtime",
+    "test:host": "cd host/node-repl && bun run test",
+    "test:ab": "bun test/ab/live-suite.ts",
+    "test:ab:dialog": "bun test/ab/live-suite.ts --case dialog",
+    "test:ab:version-handover": "bun test/ab/live-suite.ts --case version-handover",
+    "benchmark": "bun test/benchmarks/cli.ts",
+    "benchmark:doctor": "bun test/benchmarks/cli.ts doctor",
+    "benchmark:typecheck": "tsc -p test/benchmarks/tsconfig.json",
+    "benchmark:miniwob": "bun test/benchmarks/miniwob-ab-live.ts",
+    "benchmark:miniwob-session": "bun test/benchmarks/miniwob-ab-session.ts",
+    "benchmark:start": "bun test/benchmarks/cli.ts start",
+    "benchmark:prepare": "bun test/benchmarks/cli.ts prepare",
+    "benchmark:evaluate": "bun test/benchmarks/cli.ts evaluate",
+    "benchmark:webarena-session": "bun test/benchmarks/webarena-ab-session.ts",
+    "benchmark:visualwebarena-session": "bun test/benchmarks/visualwebarena-ab-session.ts",
+    "benchmark:multitab-har": "bun test/benchmarks/multitab-har-live.ts",
+    "benchmark:assistantbench-session": "bun test/benchmarks/assistantbench-ab-session.ts",
+    "verify:ci": "cargo fmt --all -- --check && bun run docs:check && bun run protocol:check && bun run lint:rust && bun run test:rust && bun run test:host && bun run typecheck && bun run benchmark:typecheck && bun run build && bun run release:check && bun run package:check",
+    "verify": "bun run verify:ci && bun run test:ab"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@hanger-source/ab": "workspace:*"
+  }
+}

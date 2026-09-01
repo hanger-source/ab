@@ -1,0 +1,4 @@
+interface:
+  display_name: "AB Browser"
+  short_description: "Use persistent Chrome with AX, locators, pixels, and events."
+  default_prompt: "Use $ab to inspect and operate the rendered page in the persistent AB browser."

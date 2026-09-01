@@ -1,0 +1,35 @@
+{
+  "name": "@hanger-source/ab-runtime-darwin-arm64",
+  "version": "0.3.0-alpha.1",
+  "description": "AB native Rust browser runtime for macOS arm64",
+  "author": "hanger",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanger-source/ab.git",
+    "directory": "sdk/native/darwin-arm64"
+  },
+  "homepage": "https://github.com/hanger-source/ab#readme",
+  "bugs": {
+    "url": "https://github.com/hanger-source/ab/issues"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/ab-runtime",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

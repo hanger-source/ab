@@ -1,0 +1,28 @@
+[package]
+name = "ab-runtime"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ab-runtime"
+path = "src/main.rs"
+
+[dependencies]
+ab-protocol = { path = "../ab-protocol" }
+agent-browser = { path = "../agent-browser/cli" }
+anyhow = "1"
+base64 = "0.22"
+fs2 = "0.4"
+futures-util = "0.3"
+libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socket2 = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "process", "fs"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm packages
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Require the supported release architecture
+        run: test "$(uname -m)" = arm64
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify source, generated artifacts, npm packages, and Skill bundle
+        run: bun run verify:ci
+
+      - name: Validate Agent Skill structure
+        run: npx --yes skills@1.5.23 add . --list
+
+      - name: Resolve release identity and npm dist-tag
+        id: identity
+        run: >-
+          node scripts/check-release-identity.mjs
+          --tag "${{ github.event.release.tag_name }}"
+          --github-prerelease "${{ github.event.release.prerelease }}"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Publish native runtime
+        run: npm publish ./sdk/native/darwin-arm64 --tag "${{ steps.identity.outputs.npm_tag }}"
+
+      - name: Publish TypeScript SDK
+        run: npm publish ./sdk/ts --tag "${{ steps.identity.outputs.npm_tag }}"

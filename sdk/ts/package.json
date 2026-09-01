@@ -1,0 +1,53 @@
+{
+  "name": "@hanger-source/ab",
+  "version": "0.3.0-alpha.1",
+  "description": "TypeScript SDK for the local AB browser runtime",
+  "author": "hanger",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanger-source/ab.git",
+    "directory": "sdk/ts"
+  },
+  "homepage": "https://github.com/hanger-source/ab#readme",
+  "bugs": {
+    "url": "https://github.com/hanger-source/ab/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "docs",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "optionalDependencies": {
+    "@hanger-source/ab-runtime-darwin-arm64": "0.3.0-alpha.1"
+  },
+  "scripts": {
+    "prebuild": "bun ../../scripts/sync-agent-docs.mjs",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

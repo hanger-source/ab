@@ -1,0 +1,623 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProtocolContract",
+  "type": "object",
+  "properties": {
+    "client_message": {
+      "$ref": "#/$defs/ClientMessage"
+    },
+    "daemon_message": {
+      "$ref": "#/$defs/DaemonMessage"
+    }
+  },
+  "required": [
+    "client_message",
+    "daemon_message"
+  ],
+  "$defs": {
+    "Cancel": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "requestId"
+      ]
+    },
+    "ChromeIdentity": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "source": {
+          "$ref": "#/$defs/ChromeSource"
+        }
+      },
+      "required": [
+        "source"
+      ]
+    },
+    "ChromeSource": {
+      "type": "string",
+      "enum": [
+        "launched",
+        "reattached"
+      ]
+    },
+    "ClientClosed": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    },
+    "ClientHello": {
+      "type": "object",
+      "properties": {
+        "buildId": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sdkVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "sdkVersion",
+        "buildId"
+      ]
+    },
+    "ClientMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "client.hello"
+            }
+          },
+          "$ref": "#/$defs/ClientHello",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "request"
+            }
+          },
+          "$ref": "#/$defs/Request",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancel"
+            }
+          },
+          "$ref": "#/$defs/Cancel",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ClientReady": {
+      "type": "object",
+      "properties": {
+        "browserGeneration": {
+          "type": "string"
+        },
+        "buildId": {
+          "type": "string"
+        },
+        "chrome": {
+          "$ref": "#/$defs/ChromeIdentity"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "daemonId": {
+          "type": "string"
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "sdkVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "sdkVersion",
+        "buildId",
+        "clientId",
+        "daemonId",
+        "browserGeneration",
+        "chrome"
+      ]
+    },
+    "DaemonEvent": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "event",
+        "value"
+      ]
+    },
+    "DaemonMessage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "client.ready"
+            }
+          },
+          "$ref": "#/$defs/ClientReady",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorData"
+            },
+            "type": {
+              "type": "string",
+              "const": "client.rejected"
+            }
+          },
+          "required": [
+            "type",
+            "error"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "response"
+            }
+          },
+          "$ref": "#/$defs/Response",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stage"
+            }
+          },
+          "$ref": "#/$defs/Stage",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "resource.event"
+            }
+          },
+          "$ref": "#/$defs/ResourceEvent",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "resource.closed"
+            }
+          },
+          "$ref": "#/$defs/ResourceClosed",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "daemon.event"
+            }
+          },
+          "$ref": "#/$defs/DaemonEvent",
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "client.closed"
+            }
+          },
+          "$ref": "#/$defs/ClientClosed",
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "ErrorContext": {
+      "type": "object",
+      "properties": {
+        "cause": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cdpMethod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "traceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ErrorData": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "details": true,
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "stage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "stage",
+        "message",
+        "retryable"
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "properties": {
+        "deadlineUnixMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": true,
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace": {
+          "$ref": "#/$defs/TraceContext"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "trace",
+        "params",
+        "deadlineUnixMs"
+      ]
+    },
+    "RequestTarget": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "documentGeneration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "elementId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frameId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resourceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tabId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ResourceClosed": {
+      "type": "object",
+      "properties": {
+        "closedAtUnixMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "lastSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceId",
+        "reason",
+        "lastSequence",
+        "complete",
+        "closedAtUnixMs"
+      ]
+    },
+    "ResourceEvent": {
+      "type": "object",
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "event": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "value": true
+      },
+      "required": [
+        "resourceId",
+        "sequence",
+        "event",
+        "value",
+        "complete"
+      ]
+    },
+    "Response": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ResponseOutcome"
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ]
+    },
+    "ResponseOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "result": true,
+            "status": {
+              "type": "string",
+              "const": "success"
+            }
+          },
+          "required": [
+            "status",
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorData"
+            },
+            "status": {
+              "type": "string",
+              "const": "error"
+            }
+          },
+          "required": [
+            "status",
+            "error"
+          ]
+        }
+      ]
+    },
+    "Stage": {
+      "type": "object",
+      "properties": {
+        "detail": true,
+        "method": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timestampUnixMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "traceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "traceId",
+        "method",
+        "name",
+        "sequence",
+        "timestampUnixMs"
+      ]
+    },
+    "TraceContext": {
+      "type": "object",
+      "properties": {
+        "traceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "traceId"
+      ]
+    }
+  }
+}
