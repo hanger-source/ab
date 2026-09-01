@@ -9,6 +9,7 @@ type LiveCase = {
   timeoutMs?: number;
   default: boolean;
   headless?: boolean;
+  isolatedSkillProduct?: boolean;
   requires?: readonly string[];
 };
 
@@ -51,7 +52,12 @@ const cases: LiveCase[] = [
   { name: "scheduler-concurrency", file: "scheduler-concurrency-live.ts", default: true },
   { name: "multitab-har", file: "../benchmarks/multitab-har-live.ts", default: true },
   { name: "miniwob-official", file: "../benchmarks/miniwob-ab-live.ts", timeoutMs: 90_000, default: false },
-  { name: "skill-client", file: "skill-client-live.mjs", default: true },
+  {
+    name: "skill-client",
+    file: "skill-client-live.mjs",
+    default: true,
+    isolatedSkillProduct: true,
+  },
   {
     name: "dialog",
     file: "dialog-lifecycle-live.ts",
@@ -86,7 +92,14 @@ for (const entry of selected) {
   const caseRoot = await mkdtemp(join(temporaryRoot, "ab-live."));
   const runtimeDirectory = join(caseRoot, "r");
   const dataDirectory = join(caseRoot, "d");
-  await Promise.all([mkdir(runtimeDirectory), mkdir(dataDirectory)]);
+  const homeDirectory = join(caseRoot, "home");
+  const temporaryDirectory = join(caseRoot, "tmp");
+  await Promise.all([
+    mkdir(runtimeDirectory),
+    mkdir(dataDirectory),
+    mkdir(homeDirectory),
+    mkdir(temporaryDirectory),
+  ]);
   const started = performance.now();
   process.stdout.write(`\nAB_LIVE_CASE_START ${entry.name} ${basename(entry.file)}\n`);
   const child = Bun.spawn(["bun", join(import.meta.dirname, entry.file)], {
@@ -101,6 +114,12 @@ for (const entry of selected) {
       AB_HANDOVER_IDLE_ROOT: join(caseRoot, "handover-idle"),
       AB_HANDOVER_ACTIVE_ROOT: join(caseRoot, "handover-active"),
       AB_HANDOVER_SIDE_EFFECT_ROOT: join(caseRoot, "handover-side-effect"),
+      ...(entry.isolatedSkillProduct
+        ? {
+            HOME: homeDirectory,
+            TMPDIR: temporaryDirectory,
+          }
+        : {}),
     },
     stdin: "ignore",
     stdout: "inherit",
