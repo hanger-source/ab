@@ -85,7 +85,7 @@ impl DownloadStore {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        records.sort_by(|left, right| left.created_at_unix_ms.cmp(&right.created_at_unix_ms));
+        records.sort_by_key(|record| record.created_at_unix_ms);
         records
     }
 
