@@ -1,10 +1,10 @@
 # Large document with a local mutation
 
-## Origin
+## Interaction shape
 
-A signed-in production CRM page exposed this interaction shape: the first Agent observation was capped at 24,000 characters while the page contained more than 400 actionable refs and more than 6,000 backend DOM nodes. Expanding one small section near the start of the page then produced a roughly 31,000-character “diff” because later refs were renumbered, even though the document and almost every element were unchanged.
+The first Agent observation is capped at 24,000 characters while the page contains more than 400 actionable refs and more than 6,000 backend DOM nodes. Expanding one small section near the start of the page can otherwise produce a roughly 31,000-character “diff” when later refs are renumbered, even though the document and almost every element are unchanged.
 
-This local page preserves that shape without retaining the CRM URL, account data, or business content.
+This local page preserves that large-document interaction shape without depending on an external site or private data.
 
 ## Pressure and path
 

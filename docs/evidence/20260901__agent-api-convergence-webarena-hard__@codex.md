@@ -6,16 +6,16 @@
 
 | 项目 | 值 |
 |---|---|
-| Git commit | `8cb395f0fbbc74fb617392c47751db12d9fc50b9` |
+| Git commit | `12c44bf1ed7a1c56cbaa78a8e19d99cbf70aaa2e` |
 | SDK | `@hanger-source/ab@0.3.0-alpha.2` |
 | Runtime | `@hanger-source/ab-runtime-darwin-arm64@0.3.0-alpha.2` |
-| Runtime build | `ab-runtime@0.3.0-alpha.2+019a185d363fa0d8` |
+| Runtime build | `ab-runtime@0.3.0-alpha.2+12e8a3d2d6c166ca` |
 | WebArena Verified | `1.2.3` |
 | evaluator checksum | `35c3385b1db4b3378657589f95f50defd4234bd36e5b93d44733fd561b01db4e` |
 | dataset checksum | `d65275660814663375028e9017e1f929e3c38321041b125795e2713b52243d30` |
 | 操作边界 | AX/ref、Agent Locator、typed form action；不使用 screenshot、CUA、evaluate、页面 JavaScript、raw CDP 或 HTTP/API 直改 |
 
-候选 Skill 从项目内的版本匹配入口加载。共享安装目录 `~/.agents/skills/ab` 不属于候选验收目录，因为直接覆盖它会改变其他正在运行的 Agent 的操作说明与 runtime resolver。误装入共享目录的候选版已由远端仓库重新安装为 `0.3.0-alpha.1`，候选复核不再改动共享安装。
+候选复核从项目内的版本匹配入口开始。全部活跃 Agent client 释放后，最终 Skill 再通过标准 `skills add` 从本地候选复制安装到 `~/.agents/skills/ab`；共享 Skill、daemon 与项目候选现在使用同一个 build。托管 Node REPL 已从共享 Skill 实际 connect/disconnect，后续 Agent 不再加载 alpha.1 client 触发版本交接。
 
 ## 可比较的旧基线
 
@@ -43,8 +43,12 @@
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
 | 769 | fresh Skill-only | 1.0 | 5040 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/769/` | 新 Agent 等待 Products grid 从 2040 条旧视图收敛为 16 条搜索结果，逐个更新并核验五个 Brown SKU 为 478；一次 Save deadline 后只对账、未重放 |
 | 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
+| 771 | fresh Skill-only，修复前 | 0.0 | 1497 entries | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/771/` | Agent 只批准 5 星 review 347，漏掉同页 4 星 review 352；官方 NetworkEventEvaluator 明确缺少 352 的 mutation |
+| 771 | fresh Skill-only，最终候选 | 1.0 | 2118 entries；`complete: true`，无 body/attachment failure | `/tmp/agent-logs/ab/webarena-api-convergence/final-fresh-rerun/771/771/` | source-blind Agent 先盘点 5 条完整 identity set，再只批准 347 与 352，并在 All/Pending 两面读回状态；两个 mutation 均被官方 evaluator 接受 |
 | 610 | source-aware | 1.0 | 89 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/610/` | AX/ref 完成发帖后在同一新帖继续评论，两个连续 POST 均被官方 evaluator 接受 |
+| 610 | fresh Skill-only，最终候选 | 1.0 | 121 entries；`complete: true`，无 body/attachment failure | `/tmp/agent-logs/ab/webarena-api-convergence/final-fresh/610/610/` | source-blind Agent 在 f/books 创建指定标题帖子，并在新帖上继续提交 `good book!`；官方 evaluator 接受连续 mutation |
 | 733 | source-aware | 1.0 | 60 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/733/` | 空 Body 上新增目标句并保存，页面成功提示、正文和官方 POST evaluator 三者一致 |
+| 733 | fresh Skill-only，最终候选 | 1.0 | 80 entries；`complete: true`，无 body/attachment failure | `/tmp/agent-logs/ab/webarena-api-convergence/final-fresh/733/733/` | source-blind Agent 找到既有 Starfleet Academy 帖子，在正文增加指定句并保存；官方 evaluator 接受 mutation |
 
 所有完成项以目录中的 `eval_result.json` 为准，不以页面成功提示或 Agent 自报成功代替。后续结果必须继续写入本台账并绑定候选 commit；如果同一任务在后续 commit 失败，先和这里的 commit、任务模式、evaluator checksum 与完整操作边界比较，再判断是产品回归、Agent 规划差异还是外部环境变化。
 
@@ -87,11 +91,15 @@ Rust daemon、Chrome、tab 与页面 mutation 均在重连后保留，因此持�
 
 771 再次复现同一边界：第一次 `Tab.goto()` 在页面已经导航到评论 352 后仍耗尽宿主 30 秒并重置 kernel；重新连接后读取到目标 URL，因而没有重放导航。后续相同商品后台中的导航均在约 2 秒返回，说明它不是固定页面慢，而是调用完成与托管会话 deadline 偶发失配。
 
+最终候选不再让导航、dispatch、settle 与 post-action observation 分别消费完整等待窗口。一次 request 的 deadline 由 action transaction 持有并贯穿后续观察；大文档 live case 在观察超时时返回普通 `action.observation.deadline`，保留已发生的 ActionResult，托管 kernel 不需要 reset。
+
 ### Observation origin 滞后
 
 同一 `Tab` 从 Dashboard 导航到 Product Attributes 与属性编辑页后，若不重连，Presenter 仍多次把 observation origin 标成 Dashboard URL；重连后 origin 才变成实际商品页 URL。操作 target 没有漂移，但模型可见的页面身份滞后，违背 observation identity 应来自当前 document 的要求。
 
 610 把这一问题推进到更强的可证伪状态：创建帖子后，AX 正文已经完整显示新帖、Comment 表单和后续 `good book!` 评论，但 `Tab.url` 与两次 observation origin 仍停留在 `/submit`。因此这不是页面中间态或 Magento 特例，而是 document replacement 后 URL identity 没有同步到 Agent observation。
+
+最终候选在每次 Presenter 输出前从 Core tab 刷新当前 origin，不再复用 wrapper 创建时的 URL；相应 Skill client live case 已覆盖同一 Tab 导航后的 origin。
 
 ### pointer click 的可证伪 no-op
 
@@ -102,6 +110,8 @@ Magento 的 `Edit Configurations` 对普通 pointer click 返回成功但没有�
 ### `write: "none"` 没有抑制动作 observation
 
 769 中对保存按钮执行 `domInvoke("click", { write: "none" })`，调用结果仍反复输出重商品页的整份 AX observation，并触发宿主输出截断。动作已正确执行，但 `write` 选项没有兑现调用方对模型可见输出的控制，增加了 REPL 上下文与超时压力。这是通用 Presenter/动作返回契约问题，不应通过任务专用 helper 绕过。
+
+最终候选修正了 `domInvoke` 的重载传参，使 `write: "none"` 同时不请求、不展示 post-action observation；默认和 `diff/state` 路径保持原语义。
 
 ### 站点行为，不进入 AB
 
@@ -117,8 +127,8 @@ Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Na
 
 第三个独立 Agent 在 769 中遇到相同的短暂空主区和搜索后旧 2040 行视图，但它等待目标 row 后，网格收敛为 16 条并完成五个 SKU。这个反例排除了“重建后的 grid 永久损坏”，把问题缩到前端数据应用的完成信号与 Agent 等待语义：544/549 在 mask/空行持续阶段没有一个可靠、有限且能等到目标 row 的高层入口，769 自行把目标 row 当作完成事实才继续。
 
-## 尚未形成的结论
+## 当前结论边界
 
 - source-aware 六题已全部完成并取得官方 6/6；这证明候选 API 在知情操作下保留了旧基线的六类复杂任务能力，不外推为全部 Hard 258 的通过率。
-- fresh Skill-only 已完成 544、549、769，当前 1/3；769 证明同一 grid 最终可以收敛，前两题仍需按等待完成信号不足保留失败。其余三题尚未完成，不能用旧 4/6 或当前三题外推候选成绩。
-- 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
+- fresh Skill-only 六题已全部完成，最终为 4/6，与旧公开形态基线持平：769、771、610、733 为 1.0，544、549 为 0.0。771 从漏掉同页目标的 0.0 提升为完整盘点后的 1.0；610、733 也都由未读取源码、评测器、数据集或旧运行的独立 Agent 取得 1.0。这个结果只覆盖固定六题，不外推为全部 Hard 258 的通过率。
+- deadline、origin、`write: "none"`、observation 集合释放、输入 settled value 与虚拟化 composite actionability 已按通用语义修复并通过完整 CI、聚焦 live case 与官方 771。documentation topic 的 client 生命周期仍保留为尚未收敛的产品边界。
