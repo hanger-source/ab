@@ -41,7 +41,7 @@
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
 | 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
 | 610 | source-aware | 1.0 | 89 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/610/` | AX/ref 完成发帖后在同一新帖继续评论，两个连续 POST 均被官方 evaluator 接受 |
-| 733 | source-aware | 待执行 | — | — | — |
+| 733 | source-aware | 1.0 | 60 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/733/` | 空 Body 上新增目标句并保存，页面成功提示、正文和官方 POST evaluator 三者一致 |
 
 所有完成项以目录中的 `eval_result.json` 为准，不以页面成功提示或 Agent 自报成功代替。后续结果必须继续写入本台账并绑定候选 commit；如果同一任务在后续 commit 失败，先和这里的 commit、任务模式、evaluator checksum 与完整操作边界比较，再判断是产品回归、Agent 规划差异还是外部环境变化。
 
@@ -106,6 +106,6 @@ Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Na
 
 ## 尚未形成的结论
 
-- source-aware 尚未完成 6/6；目前确认 544、549、769、771、610 五题通过。
+- source-aware 六题已全部完成并取得官方 6/6；这证明候选 API 在知情操作下保留了旧基线的六类复杂任务能力，不外推为全部 Hard 258 的通过率。
 - fresh Skill-only 尚未重跑；不能用旧 4/6 代表候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
