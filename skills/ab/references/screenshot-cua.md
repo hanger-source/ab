@@ -6,7 +6,7 @@ Agent `ax.get/write("screenshot"|"both")` defaults to `scale: "css"`: one image 
 
 `shot.cssViewport` always reports the live CSS `width`, `height`, `pageX`, `pageY`, and `deviceScaleFactor`. `shot.width/height` are image pixels. With viewport `scale: "css"` the two sizes match; with `scale: "device"` they may not. Never send device-image pixel coordinates directly to CUA.
 
-Use Agent `ax.write("screenshot")` or `write("both")` when the model must see pixels. In the managed Node REPL MCP host, the Presenter verifies the artifact and returns its bytes as a standard MCP image content block. In an ordinary Node process, the Presenter prints artifact metadata and the host opens that path with its image capability. `get("screenshot")` returns the typed object without presenting it in either environment.
+Use Agent `ax.write("screenshot")` or `write("both")` when the model must see pixels. In the managed Node REPL MCP host, the Presenter verifies the artifact and returns its bytes as a standard MCP image content block. In an ordinary Node process, the Presenter prints artifact metadata and the host opens that path with its image capability. `write()` also returns the same `Screenshot` handle that was presented; `get("screenshot")` returns a new typed object without presenting it in either environment.
 
 Coordinate input must include the exact screenshot `viewportId`. Navigation, scrolling, resizing, device scale changes, or layout changes produce a new identity. AB rejects stale coordinates instead of applying them to a different viewport.
 
@@ -18,10 +18,16 @@ The Presenter always emits an `AB_SCREENSHOT` record containing the canonical ar
 
 ```js
 await browser.documentation("screenshot");
-await tab.ax.write("screenshot");
+const shot = await tab.ax.write("screenshot");
+try {
+  // Choose coordinates from the pixels just presented by the same shot.
+  await tab.cua.click({ x: 320, y: 180, viewportId: shot.viewportId });
+} finally {
+  await shot.dispose();
+}
 ```
 
-Use `write("both")` when semantic refs and pixels must represent the same transaction. Use `get()` when program code needs the object and the host will present it separately.
+Use `write("both")` when semantic refs and pixels must represent the same transaction; its required `state` and `screenshot` fields are exactly the objects passed to the Presenter. Use `get()` when program code needs an unpresented object and will own its cleanup separately.
 
 ## Viewport versus full-page screenshots
 

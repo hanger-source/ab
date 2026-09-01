@@ -87,9 +87,9 @@ tab.ax.get("state", options?): Promise<AXState>
 tab.ax.get("screenshot", options?): Promise<Screenshot>
 tab.ax.get("both", options?): Promise<PageObservation>
 
-tab.ax.write("state", options?): Promise<void>
-tab.ax.write("screenshot", options?): Promise<void>
-tab.ax.write("both", options?): Promise<void>
+tab.ax.write("state", options?): Promise<AXState>
+tab.ax.write("screenshot", options?): Promise<Screenshot>
+tab.ax.write("both", options?): Promise<{ state: AXState, screenshot: Screenshot }>
 
 tab.ax.click(refId, options?)
 tab.ax.doubleClick(refId, options?)
@@ -108,7 +108,7 @@ tab.ax.dragTo(sourceRefId, targetRefId, options?)
 tab.ax.scrollIntoView(refId, options?)
 ```
 
-`get()` returns typed data and never displays or changes the presented baseline. `write("state"|"both")` advances the current Agent-session/tab baseline only after Presenter success; `write("screenshot")` does not. A short-ref action resolves that baseline locally, then sends explicit `observationId + refId` to Rust. No baseline means `agent_observation_required`; there is no server-global ref map or guessed replacement.
+`get()` returns caller-owned typed data and never displays or changes the presented baseline. `write()` returns the exact typed object it presented; `write("state"|"both")` advances the current Agent-session/tab baseline only after Presenter success, while `write("screenshot")` does not. A short-ref action resolves that baseline locally, then sends explicit `observationId + refId` to Rust. No baseline means `agent_observation_required`; there is no server-global ref map or guessed replacement.
 
 ## Core AX state and refs
 

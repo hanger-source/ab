@@ -59,7 +59,7 @@ try {
   const tabs = await browser.tabs.list();
   const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
 
-  await tab.ax.write("state", { mode: "interactive" });
+  const state = await tab.ax.write("state", { mode: "interactive" });
   await tab.ax.click("e2", { write: "diff" });
   await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 } finally {
@@ -71,7 +71,7 @@ try {
 
 ## Agent 操作面
 
-- 陌生页面先用 `ax.write("state")` 把 AX observation 喂给 Agent，再使用已展示 observation 的 ref；
+- 陌生页面先用 `const state = await ax.write("state")` 把 AX observation 喂给 Agent；返回的 `state`、Presenter observation 与短 ref baseline 是同一个 identity；
 - 稳定、重复结构使用 `tab.playwright` 中由 Rust 执行的 Playwright-style Locator；
 - canvas、地图和远程桌面使用 screenshot + CUA，并绑定 viewport identity；
 - 页面专有计算使用 `tab.dev.evaluate()`；

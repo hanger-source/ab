@@ -20,7 +20,7 @@ These recipes combine AB primitives into complete Agent loops. They are patterns
 ## Explore an unfamiliar page
 
 ```js
-await tab.ax.write("state", { maxChars: 24_000 });
+const state = await tab.ax.write("state", { maxChars: 24_000 });
 // Choose a displayed ref from the presented state.
 await tab.ax.click("e7", { write: "diff" });
 await tab.ax.write("state");

@@ -75,12 +75,12 @@ Do not silently turn a failed ref or Locator action into JavaScript or coordinat
 ## AX-first loop
 
 ```ts
-await tab.ax.write("state", { maxChars: 24_000 });
+const state = await tab.ax.write("state", { maxChars: 24_000 });
 await tab.ax.fill("e8", "agent@example.com");
 await tab.ax.click("e12", { write: "diff" });
 ```
 
-`write("state")` displays bounded untrusted page content and establishes the last presented observation for this Agent session and tab. Short refs are only a convenience: every action sends the exact observation id and ref id to Rust. After navigation or meaningful rerender, write a new state or diff. Never guess old refs.
+`write("state")` displays bounded untrusted page content, establishes the last presented observation for this Agent session and tab, and returns that exact `AXState`. `state.id`, the Presenter observation id, and the baseline used by the next short-ref action are the same identity; do not call `get()` after `write()` to obtain it. Short refs are only a convenience: every action sends the exact observation id and ref id to Rust. After navigation or meaningful rerender, write a new state or diff. Never guess old refs.
 
 Use `get()` when code needs the typed object without showing it or changing the presented baseline:
 
@@ -93,7 +93,7 @@ try {
 }
 ```
 
-`get()` never makes `e12` available to later short-ref calls. `write("screenshot")` also leaves the AX baseline unchanged. Only a successfully displayed state or both observation advances it.
+`get()` never makes `e12` available to later short-ref calls. `write("screenshot")` also leaves the AX baseline unchanged. Only a successfully displayed state or both observation advances it. A state returned by `write()` remains live as the presented baseline until another state is successfully presented, `ax.dispose()` runs, or the client disconnects; do not dispose it while planning to use its short refs.
 
 Every typed state returned by `get("state" | "both")` is a live server observation until disposed. `tab.ax.liveObservations` exposes the current Agent-owned count. If a workflow abandons several states or recovery needs a clean observation set, `await tab.ax.dispose()` releases all of them, including the presented short-ref baseline, without disconnecting the browser; call `write("state")` again before the next short-ref action.
 

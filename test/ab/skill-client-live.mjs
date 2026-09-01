@@ -5,9 +5,14 @@ const { connect } = await import(clientPath);
 
 let taskTab;
 const presented = [];
+let rejectNextAxPresentation = false;
 const browser = await connect({
     presenter: {
       presentText(value) {
+        if (rejectNextAxPresentation && value.kind === "ax") {
+          rejectNextAxPresentation = false;
+          throw new Error("intentional AX presentation rejection");
+        }
         presented.push(value);
       },
       presentImage() {
@@ -50,12 +55,18 @@ try {
     const documentTitle = await taskTab.dev.evaluate(() => document.title);
     assert.equal(documentTitle, "AB Skill client");
 
-    await taskTab.ax.write("state", { mode: "interactive" });
+    const initialState = await taskTab.ax.write("state", { mode: "interactive" });
+    assert.equal(
+      initialState.id,
+      presented.filter((value) => value.kind === "ax").at(-1).observationId,
+    );
     const initialAxPresentations = presented.filter((value) => value.kind === "ax").length;
-    await taskTab.playwright.getByLabel("Email").fill("agent@example.com");
+    const fillResult = await taskTab.playwright.getByLabel("Email").fill("agent@example.com");
     const afterFillPresentations = presented.filter((value) => value.kind === "ax");
     assert.equal(afterFillPresentations.length, initialAxPresentations + 1);
     assert.match(afterFillPresentations.at(-1).text, /Email/);
+    assert.equal(fillResult.observation.id, afterFillPresentations.at(-1).observationId);
+    assert.equal(initialState.disposed, true);
     await taskTab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
     const afterClickPresentations = presented.filter((value) => value.kind === "ax");
     assert.equal(afterClickPresentations.length, initialAxPresentations + 2);
@@ -120,15 +131,34 @@ try {
     assert.equal(afterWaitPresentations.length, beforeWaitPresentations + 1);
     assert.match(afterWaitPresentations.at(-1).text, /Delayed semantic option/);
 
+    const presentedBeforeGets = await taskTab.ax.write("state", { mode: "interactive" });
+    const silentRef = presentedBeforeGets.refs().find((ref) => ref.name === "Silent action");
+    assert(silentRef);
     const retainedOne = await taskTab.ax.get("state", { mode: "interactive" });
     const retainedTwo = await taskTab.ax.get("state", { mode: "interactive" });
     assert(taskTab.ax.liveObservations >= 3);
+    await taskTab.ax.click(silentRef.id, { write: "none" });
+
+    const rejectedState = await taskTab.ax.get("state", { mode: "interactive" });
+    rejectNextAxPresentation = true;
+    await assert.rejects(
+      taskTab.ax.write(rejectedState),
+      /intentional AX presentation rejection/,
+    );
+    assert.equal(rejectedState.disposed, true);
+    assert.equal(presentedBeforeGets.disposed, false);
+    await taskTab.ax.click(silentRef.id, { write: "none" });
+
     await taskTab.ax.dispose();
     assert.equal(taskTab.ax.liveObservations, 0);
     assert.equal(retainedOne.disposed, true);
     assert.equal(retainedTwo.disposed, true);
-    await taskTab.ax.write("state", { mode: "interactive" });
+    const resetState = await taskTab.ax.write("state", { mode: "interactive" });
     assert.equal(taskTab.ax.liveObservations, 1);
+    assert.equal(
+      resetState.id,
+      presented.filter((value) => value.kind === "ax").at(-1).observationId,
+    );
 
     await browser.documentation("screenshot");
     const screenshot = await taskTab.ax.get("screenshot");

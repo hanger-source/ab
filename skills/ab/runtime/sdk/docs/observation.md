@@ -2,7 +2,14 @@
 
 ## Separate state acquisition from presentation
 
-`tab.ax.get()` returns a typed object for code. It does not print page text and does not advance the short-ref baseline. `tab.ax.write()` goes through the Presenter; a successful `write("state")` or `write("both")` makes exactly that observation's refs available to Agent short-ref actions.
+`tab.ax.get()` returns a caller-owned typed object for code. It does not print page text and does not advance the short-ref baseline. `tab.ax.write()` goes through the Presenter and returns the exact typed object it presented; a successful `write("state")` or `write("both")` makes exactly that returned observation's refs available to Agent short-ref actions.
+
+```js
+const state = await tab.ax.write("state");
+// state.id is the Presenter identity and the next short-ref baseline identity.
+```
+
+Do not follow `write()` with `get()` to recover the displayed state. That second call captures a different observation, cannot own the already displayed short refs, and must be disposed separately.
 
 Core `snapshot()` always remains explicit:
 
@@ -65,7 +72,7 @@ When the answer may lie outside a bounded state, narrow by navigation/section or
 
 Each short id such as `e12` belongs to exactly one observation. Agent `write()` stores the successfully presented `AXState` as that tab's current baseline. Meaningful rerender, navigation, frame replacement, or a stale action requires a new state. Never search a new state for the same numeric ref and assume continuity.
 
-Presentation must succeed before the baseline advances. If the Presenter throws, AB disposes the new state and keeps the previous successfully shown state. `write("screenshot")` does not change AX baseline. `write("both")` changes it only after both text and screenshot are presented.
+Presentation must succeed before the baseline advances. If the Presenter throws, AB disposes the unreturned new state and keeps the previous successfully shown state. `write("screenshot")` does not change AX baseline. `write("both")` changes it only after both text and screenshot are presented. A state returned by `write()` is the presentation-owned baseline: the next successful state presentation releases it automatically. A state returned by `get()` remains caller-owned until explicit disposal, `ax.dispose()`, or disconnect.
 
 ## Atomic observation ownership
 

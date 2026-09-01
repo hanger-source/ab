@@ -37,7 +37,7 @@ An existing tab is user or previous-task state. Do not close, reload, navigate, 
 
 ## During a task
 
-Each wrapped tab owns an independent last-presented AX baseline. Switching `tab` variables does not transfer short refs. Run `tab.ax.write("state")` on the newly selected tab before using `tab.ax.click("e…")`.
+Each wrapped tab owns an independent last-presented AX baseline. Switching `tab` variables does not transfer short refs. `const state = await tab.ax.write("state")` returns the exact baseline established on the newly selected tab; do not call `get()` to recreate it before using `tab.ax.click("e…")`.
 
 Keep resource handles in variables and pair every creation with deterministic cleanup:
 

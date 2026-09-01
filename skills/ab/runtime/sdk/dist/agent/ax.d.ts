@@ -24,8 +24,17 @@ export declare class AX {
     get(content: "state", options?: WriteOptions): Promise<AXState>;
     get(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
     get(content: "both", options?: WriteOptions): Promise<PageObservation>;
-    write(content: AXContent, options?: WriteOptions): Promise<void>;
-    write(state: AXState): Promise<void>;
+    write(content: "state", options?: WriteOptions): Promise<AXState>;
+    write(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
+    write(content: "both", options?: WriteOptions): Promise<{
+        state: AXState;
+        screenshot: Screenshot;
+    }>;
+    write(content: AXContent, options?: WriteOptions): Promise<AXState | Screenshot | {
+        state: AXState;
+        screenshot: Screenshot;
+    }>;
+    write(state: AXState): Promise<AXState>;
     click(refId: string, options?: ClickActionOptions): Promise<ActionResult>;
     doubleClick(refId: string, options?: RefActionOptions): Promise<ActionResult>;
     hover(refId: string, options?: RefActionOptions): Promise<ActionResult>;

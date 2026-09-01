@@ -90,12 +90,21 @@ export class AX {
     return observation;
   }
 
-  write(content: AXContent, options?: WriteOptions): Promise<void>;
-  write(state: AXState): Promise<void>;
+  write(content: "state", options?: WriteOptions): Promise<AXState>;
+  write(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
+  write(
+    content: "both",
+    options?: WriteOptions,
+  ): Promise<{ state: AXState; screenshot: Screenshot }>;
+  write(
+    content: AXContent,
+    options?: WriteOptions,
+  ): Promise<AXState | Screenshot | { state: AXState; screenshot: Screenshot }>;
+  write(state: AXState): Promise<AXState>;
   async write(
     content: AXContent | AXState,
     options: WriteOptions = {},
-  ): Promise<void> {
+  ): Promise<AXState | Screenshot | { state: AXState; screenshot: Screenshot }> {
     if (typeof content !== "string") {
       if (content.targetId !== this.#tab.id) {
         throw new ABError({
@@ -107,11 +116,11 @@ export class AX {
       try {
         await this.#presentState(content);
       } catch (error) {
-        await content.dispose().catch(() => undefined);
+        await this.#releaseUnpresentedState(content);
         throw error;
       }
       await this.#replacePresentedState(content);
-      return;
+      return content;
     }
     if (content === "screenshot" || content === "both") {
       this.#documentation.require("screenshot", `tab.ax.write(${JSON.stringify(content)})`);
@@ -121,20 +130,25 @@ export class AX {
       try {
         await this.#presentState(state);
       } catch (error) {
-        await state.dispose().catch(() => undefined);
+        await this.#releaseUnpresentedState(state);
         throw error;
       }
       await this.#replacePresentedState(state);
-      return;
+      return state;
     }
     if (content === "screenshot") {
       const screenshot = await this.get("screenshot", options);
-      await this.#presenter.presentImage({
-        kind: "screenshot",
-        origin: await this.#currentOrigin(),
-        screenshot,
-      });
-      return;
+      try {
+        await this.#presenter.presentImage({
+          kind: "screenshot",
+          origin: await this.#currentOrigin(),
+          screenshot,
+        });
+      } catch (error) {
+        await screenshot.dispose().catch(() => undefined);
+        throw error;
+      }
+      return screenshot;
     }
 
     const observation = await this.get("both", options);
@@ -142,6 +156,9 @@ export class AX {
       if (observation.state) {
         await observation.state.dispose().catch(() => undefined);
         this.#ownedStates.delete(observation.state);
+      }
+      if (observation.screenshot) {
+        await observation.screenshot.dispose().catch(() => undefined);
       }
       throw new ABError({
         kind: "observation_incomplete",
@@ -157,10 +174,17 @@ export class AX {
         screenshot: observation.screenshot,
       });
     } catch (error) {
-      await observation.state.dispose().catch(() => undefined);
+      await Promise.allSettled([
+        this.#releaseUnpresentedState(observation.state),
+        observation.screenshot.dispose(),
+      ]);
       throw error;
     }
     await this.#replacePresentedState(observation.state);
+    return {
+      state: observation.state,
+      screenshot: observation.screenshot,
+    };
   }
 
   click(refId: string, options: ClickActionOptions = {}): Promise<ActionResult> {
@@ -401,6 +425,12 @@ export class AX {
       await previous.dispose();
       this.#ownedStates.delete(previous);
     }
+  }
+
+  async #releaseUnpresentedState(state: AXState): Promise<void> {
+    if (state === this.#lastPresentedState) return;
+    await state.dispose().catch(() => undefined);
+    this.#ownedStates.delete(state);
   }
 
   #track(state: AXState): AXState {

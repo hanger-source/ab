@@ -8,7 +8,7 @@ import { connect } from "@hanger-source/ab/agent";
 const browser = await connect();
 const tabs = await browser.tabs.list();
 const tab = tabs[0] ?? await browser.tabs.open("https://example.com/");
-await tab.ax.write("state");
+const state = await tab.ax.write("state");
 await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 ```
 

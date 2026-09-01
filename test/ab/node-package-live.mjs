@@ -19,7 +19,6 @@ try {
       async presentImage(value) {
         assert.equal((await value.screenshot.read()).byteLength, value.screenshot.bytes);
         presented.images.push(value);
-        await value.screenshot.dispose();
       },
     },
   });
@@ -42,7 +41,7 @@ try {
     );
     const screenshotDocumentation = await browser.documentation("screenshot");
     assert.match(screenshotDocumentation, /viewportId/);
-    await tab.ax.write("both", { mode: "interactive" });
+    const page = await tab.ax.write("both", { mode: "interactive" });
 
     const documentationPresentations = presented.text.filter(value => value.kind === "documentation");
     const statePresentation = presented.text.find(value => value.kind === "ax");
@@ -50,6 +49,8 @@ try {
     assert(statePresentation);
     assert.equal(presented.text.length, 3);
     assert.equal(presented.images.length, 1);
+    assert.equal(page.state.id, statePresentation.observationId);
+    assert.equal(page.screenshot, presented.images[0].screenshot);
     assert.equal(presented.images[0].screenshot.scale, "css");
     assert.equal(
       presented.images[0].screenshot.width,
@@ -68,6 +69,8 @@ try {
     assert.match(statePresentation.text, /Node package action/);
     assert.match(statePresentation.origin, /^data:text\/html/);
     assert.equal(presented.images[0].origin, statePresentation.origin);
+
+    await page.screenshot.dispose();
 
     console.log(JSON.stringify({
       runtime: browser.identity.runtimeVersion,

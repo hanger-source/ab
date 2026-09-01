@@ -52,11 +52,11 @@ export class AX {
                 await this.#presentState(content);
             }
             catch (error) {
-                await content.dispose().catch(() => undefined);
+                await this.#releaseUnpresentedState(content);
                 throw error;
             }
             await this.#replacePresentedState(content);
-            return;
+            return content;
         }
         if (content === "screenshot" || content === "both") {
             this.#documentation.require("screenshot", `tab.ax.write(${JSON.stringify(content)})`);
@@ -67,26 +67,35 @@ export class AX {
                 await this.#presentState(state);
             }
             catch (error) {
-                await state.dispose().catch(() => undefined);
+                await this.#releaseUnpresentedState(state);
                 throw error;
             }
             await this.#replacePresentedState(state);
-            return;
+            return state;
         }
         if (content === "screenshot") {
             const screenshot = await this.get("screenshot", options);
-            await this.#presenter.presentImage({
-                kind: "screenshot",
-                origin: await this.#currentOrigin(),
-                screenshot,
-            });
-            return;
+            try {
+                await this.#presenter.presentImage({
+                    kind: "screenshot",
+                    origin: await this.#currentOrigin(),
+                    screenshot,
+                });
+            }
+            catch (error) {
+                await screenshot.dispose().catch(() => undefined);
+                throw error;
+            }
+            return screenshot;
         }
         const observation = await this.get("both", options);
         if (!observation.state || !observation.screenshot) {
             if (observation.state) {
                 await observation.state.dispose().catch(() => undefined);
                 this.#ownedStates.delete(observation.state);
+            }
+            if (observation.screenshot) {
+                await observation.screenshot.dispose().catch(() => undefined);
             }
             throw new ABError({
                 kind: "observation_incomplete",
@@ -103,10 +112,17 @@ export class AX {
             });
         }
         catch (error) {
-            await observation.state.dispose().catch(() => undefined);
+            await Promise.allSettled([
+                this.#releaseUnpresentedState(observation.state),
+                observation.screenshot.dispose(),
+            ]);
             throw error;
         }
         await this.#replacePresentedState(observation.state);
+        return {
+            state: observation.state,
+            screenshot: observation.screenshot,
+        };
     }
     click(refId, options = {}) {
         const { write = "diff", ...action } = options;
@@ -303,6 +319,12 @@ export class AX {
             await previous.dispose();
             this.#ownedStates.delete(previous);
         }
+    }
+    async #releaseUnpresentedState(state) {
+        if (state === this.#lastPresentedState)
+            return;
+        await state.dispose().catch(() => undefined);
+        this.#ownedStates.delete(state);
     }
     #track(state) {
         this.#pruneDisposedStates();
