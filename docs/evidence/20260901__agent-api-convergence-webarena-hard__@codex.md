@@ -41,6 +41,7 @@
 | 549 | source-aware | 1.0 | 1837 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware-r2/549/` | 新属性与唯一 `XXXL + Green` 变体均由官方网络 evaluator 接受 |
 | 549 | fresh Skill-only | 0.0 | 378 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/549/` | 新 Agent 在重建后的正式基线中遇到相同 Products 空行/loading mask，停止重复动作且未产生商品 mutation |
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
+| 769 | fresh Skill-only | 1.0 | 5040 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/769/` | 新 Agent 等待 Products grid 从 2040 条旧视图收敛为 16 条搜索结果，逐个更新并核验五个 Brown SKU 为 478；一次 Save deadline 后只对账、未重放 |
 | 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
 | 610 | source-aware | 1.0 | 89 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/610/` | AX/ref 完成发帖后在同一新帖继续评论，两个连续 POST 均被官方 evaluator 接受 |
 | 733 | source-aware | 1.0 | 60 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/733/` | 空 Body 上新增目标句并保存，页面成功提示、正文和官方 POST evaluator 三者一致 |
@@ -112,10 +113,12 @@ Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Na
 
 ### Magento Products 数据已返回但 UI 未完成渲染
 
-重建容器后的 fresh 544 与 549 都在 Products 页观察到 2040 records、200 个 `tr.data-row`，但所有行高度为 0、无单元格文本，两个 `admin__data-grid-loading-mask` 持续可见。HAR 中对应 `mui/index/render?namespace=product_listing` 返回 HTTP 200、16639-byte JSON，包含 2040 条总数和当前页真实商品 items；因此不能把它归为后端、Elasticsearch 或 Agent 搜索词错误。当前证据指向 Magento 前端把已返回数据应用到 Knockout grid 的链路未完成，尚未区分站点 JS、持久 Chrome/profile 状态或 AB action/observation settle 对页面时序的影响。
+重建容器后的 fresh 544 与 549 都在 Products 页观察到 2040 records、200 个 `tr.data-row`，但所有行高度为 0、无单元格文本，两个 `admin__data-grid-loading-mask` 持续可见。HAR 中对应 `mui/index/render?namespace=product_listing` 返回 HTTP 200、16639-byte JSON，包含 2040 条总数和当前页真实商品 items；因此不能把它归为后端、Elasticsearch 或 Agent 搜索词错误。
+
+第三个独立 Agent 在 769 中遇到相同的短暂空主区和搜索后旧 2040 行视图，但它等待目标 row 后，网格收敛为 16 条并完成五个 SKU。这个反例排除了“重建后的 grid 永久损坏”，把问题缩到前端数据应用的完成信号与 Agent 等待语义：544/549 在 mask/空行持续阶段没有一个可靠、有限且能等到目标 row 的高层入口，769 自行把目标 row 当作完成事实才继续。
 
 ## 尚未形成的结论
 
 - source-aware 六题已全部完成并取得官方 6/6；这证明候选 API 在知情操作下保留了旧基线的六类复杂任务能力，不外推为全部 Hard 258 的通过率。
-- fresh Skill-only 已完成 544、549，当前 0/2；两题都受重建后 Products grid 未完成渲染影响，不能沿用旧基线的字段语义/集合规划归因。其余四题尚未完成，不能用旧 4/6 或当前两题外推候选成绩。
+- fresh Skill-only 已完成 544、549、769，当前 1/3；769 证明同一 grid 最终可以收敛，前两题仍需按等待完成信号不足保留失败。其余三题尚未完成，不能用旧 4/6 或当前三题外推候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
