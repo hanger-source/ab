@@ -163,6 +163,8 @@ WebArena/VisualWebArena evaluator 使用 Playwright、captioning 或官方 evalu
 
 六个任务都使用官方 WebArena-Verified `1.2.3` 任务、真实本地站点、AB 持有的 headed Chrome、完整 HAR 和官方 evaluator。每个站点在 source-aware 与 source-blind 之间重置；root 先阅读任务和 evaluator，用于区分能力缺口与题意/evaluator 差异；fresh Agent 只得到任务原文、正式安装的 AB Skill 和 tab id，不读取项目源码、benchmark 数据、evaluator、HAR 或数据库。
 
+这组六题结果首次随旧仓库 `at-chromium-framework-lab` 的提交 `4ee633004058ceb15db79ad766387e8730ba1fe6` 完整进入 Git；迁入独立 `ab` 仓库后的对应完整快照是 `0a36ab3f6fba5b05bebc69f3e9268cfc89e4f4dc`。当时的 `eval_result.json`、HAR 和 Agent response 落在 `/tmp/agent-logs/at-chromium-framework-lab/`，这些临时目录已经不存在，因此长期可复核证据限于下列任务编号、官方分数、provenance、结果路径记录和这两个代码基线，不能声称旧 HAR 原件仍被保存。后续对照必须把候选 Git commit、package/Skill build id 与官方结果文件一同保留，不能再只保存临时路径。
+
 浏览器执行边界是 AX state/ref、语义 Locator、Locator 的 typed inspect/state read、表单和键盘动作。计入对照的轮次不使用 screenshot/image/vision、坐标/CUA、`evaluate`、页面 JavaScript、raw CDP 或 HTTP/API 直改。`domInvoke` 只在普通 pointer action 已经被可见结果证实为 no-op 后，作为 Skill 明文公开的 Locator mutation 使用并披露 dispatch，不是隐藏 fallback。
 
 733 的一次 root 尝试误调用未指定 observation shape 的 `tab.ax.get()`，虽然没有读取或使用生成的图片，仍因产生 screenshot artifact 而从 AX-only 证据中剔除。重置后的干净 root 轮次落在独立目录并重新取得官方 `score = 1.0`。这说明“未使用图片”不能替代“没有调用图片能力”的 provenance 边界。
