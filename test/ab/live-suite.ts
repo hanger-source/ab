@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
@@ -39,6 +39,26 @@ const cases: LiveCase[] = [
   {
     name: "scenario-active-surface-overlays",
     file: "scenarios/active-surface-overlays/live.ts",
+    default: true,
+  },
+  {
+    name: "scenario-animated-surface-dismissal",
+    file: "scenarios/animated-surface-dismissal/live.ts",
+    default: true,
+  },
+  {
+    name: "scenario-async-spa-navigation",
+    file: "scenarios/async-spa-navigation/live.ts",
+    default: true,
+  },
+  {
+    name: "scenario-pointer-hit-target-layout-shift",
+    file: "scenarios/pointer-hit-target-layout-shift/live.ts",
+    default: true,
+  },
+  {
+    name: "scenario-pointer-click-sequence",
+    file: "scenarios/pointer-click-sequence/live.ts",
     default: true,
   },
   {
@@ -94,12 +114,30 @@ for (const entry of selected) {
   const dataDirectory = join(caseRoot, "d");
   const homeDirectory = join(caseRoot, "home");
   const temporaryDirectory = join(caseRoot, "tmp");
+  const isolatedDataDirectory = join(homeDirectory, "Library", "Application Support", "ab");
+  const isolatedRuntimeDirectory = join(temporaryDirectory, `ab-${process.geteuid?.() ?? process.pid}`);
+  const effectiveDataDirectory = entry.isolatedSkillProduct ? isolatedDataDirectory : dataDirectory;
+  const effectiveRuntimeDirectory = entry.isolatedSkillProduct ? isolatedRuntimeDirectory : runtimeDirectory;
+  const chromePath = process.env.AB_CHROME_PATH
+    ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const chromeWrapper = join(caseRoot, "chrome-with-test-keychain");
   await Promise.all([
     mkdir(runtimeDirectory),
     mkdir(dataDirectory),
-    mkdir(homeDirectory),
     mkdir(temporaryDirectory),
   ]);
+  await mkdir(isolatedDataDirectory, { recursive: true });
+  await writeFile(
+    chromeWrapper,
+    '#!/bin/sh\nexec "$AB_TEST_REAL_CHROME" --password-store=basic --use-mock-keychain "$@"\n',
+    { mode: 0o700 },
+  );
+  if (entry.isolatedSkillProduct) {
+    await writeFile(
+      join(isolatedDataDirectory, "config.json"),
+      `${JSON.stringify({ chromePath: chromeWrapper }, null, 2)}\n`,
+    );
+  }
   const started = performance.now();
   process.stdout.write(`\nAB_LIVE_CASE_START ${entry.name} ${basename(entry.file)}\n`);
   const child = Bun.spawn(["bun", join(import.meta.dirname, entry.file)], {
@@ -109,6 +147,8 @@ for (const entry of selected) {
       AB_RUNTIME_BINARY: runtimeBinary,
       AB_RUNTIME_DIR: runtimeDirectory,
       AB_DATA_DIR: dataDirectory,
+      AB_CHROME_PATH: chromeWrapper,
+      AB_TEST_REAL_CHROME: chromePath,
       AB_HEADLESS: entry.headless === false ? "0" : "1",
       AB_SKILL_CLIENT: skillClient,
       AB_HANDOVER_IDLE_ROOT: join(caseRoot, "handover-idle"),
@@ -132,7 +172,7 @@ for (const entry of selected) {
   }, entry.timeoutMs ?? 60_000);
   const exitCode = await child.exited;
   clearTimeout(timer);
-  await cleanupCaseProcesses(runtimeDirectory, dataDirectory);
+  await cleanupCaseProcesses(effectiveRuntimeDirectory, effectiveDataDirectory);
   const ms = Math.round(performance.now() - started);
   const status = timedOut ? "timed_out" : exitCode === 0 ? "passed" : "failed";
   results.push({ name: entry.name, status, ms });

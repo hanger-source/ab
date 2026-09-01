@@ -9,4 +9,6 @@
 //! protocol, browser identity, multi-client resource ownership and
 //! persistent-profile lifecycle.
 
-pub use agent_browser::native::{cdp, diff, element, interaction, screenshot, snapshot};
+pub use agent_browser::native::{
+    cdp, diff, element, interaction, pointer_action, screenshot, snapshot,
+};

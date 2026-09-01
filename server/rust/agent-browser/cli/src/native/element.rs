@@ -832,9 +832,14 @@ fn build_count_elements_js(selector: &str) -> String {
 /// description of the element that would actually receive a click at (x, y)
 /// when that element is unrelated to `el`, or null when the click would land
 /// on `el` (or something that activates it). Relations that count as "lands
-/// on el": shadow-including ancestors/descendants in either direction, and
+/// on el": the target itself, a shadow-including descendant, and explicit
 /// label/control association (custom checkboxes hide the input under a styled
-/// sibling inside the same label).
+/// sibling inside the same label). A generic ancestor or same-text element is
+/// not evidence that pointer input reached the intended target.
+///
+/// Contract and evidence:
+/// `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+/// The executable counterexample is `test/ab/locator-semantics-live.ts`.
 const BLOCKER_AT_JS: &str = r#"(doc, el, x, y) => {
     // Descend from the given document through same-origin iframes so a point
     // over a frame resolves to the element inside it, in that frame's space.
@@ -850,32 +855,10 @@ const BLOCKER_AT_JS: &str = r#"(doc, el, x, y) => {
     if (!hit || hit === el) return null;
     const up = (n) => n.parentNode || n.host || (n.getRootNode && n.getRootNode().host) || null;
     for (let n = hit; n; n = up(n)) { if (n === el) return null; }
-    for (let n = el; n; n = up(n)) { if (n === hit) return null; }
     const hitLabel = hit.closest ? hit.closest('label') : null;
     if (hitLabel && (hitLabel.control === el || hitLabel.contains(el))) return null;
     const elLabel = el.closest ? el.closest('label') : null;
     if (elLabel && elLabel.contains(hit)) return null;
-    // Virtualized composite widgets sometimes expose a zero-area ARIA item
-    // beside a separate visible presentation node. The semantic node is the
-    // right Agent target, while pointer input must land on the presentation.
-    // Only accept that proxy when the target is degenerate, its role is an
-    // item role, and the hit surface carries the same normalized text. Real
-    // overlays over ordinary actionable elements still fail interception.
-    const rect = el.getBoundingClientRect();
-    const mirrorRoles = new Set([
-        'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
-        'treeitem', 'tab', 'row', 'gridcell'
-    ]);
-    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-    const targetText = normalizeText(el.getAttribute && el.getAttribute('aria-label')) ||
-        normalizeText(el.textContent);
-    if ((rect.width <= 1 || rect.height <= 1) &&
-        mirrorRoles.has(el.getAttribute && el.getAttribute('role')) && targetText) {
-        for (let n = hit; n && n !== d.documentElement; n = up(n)) {
-            if (normalizeText(n.getAttribute && n.getAttribute('aria-label')) === targetText ||
-                normalizeText(n.textContent) === targetText) return null;
-        }
-    }
     let desc = hit.tagName.toLowerCase();
     if (hit.id) desc += '#' + hit.id;
     else if (typeof hit.className === 'string' && hit.className.trim())

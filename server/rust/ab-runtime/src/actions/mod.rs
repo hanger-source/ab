@@ -41,6 +41,36 @@ impl ActionRunner {
         operation: &str,
         arguments: &Value,
     ) -> AbResult<Value> {
+        Self::perform_inner(context, state, target, operation, arguments, None).await
+    }
+
+    pub async fn perform_transaction(
+        context: &TargetContext,
+        state: &mut TargetState,
+        target: &ElementTarget,
+        operation: &str,
+        arguments: &Value,
+        before_dispatch: &(dyn Fn() + Send + Sync),
+    ) -> AbResult<Value> {
+        Self::perform_inner(
+            context,
+            state,
+            target,
+            operation,
+            arguments,
+            Some(before_dispatch),
+        )
+        .await
+    }
+
+    async fn perform_inner(
+        context: &TargetContext,
+        state: &mut TargetState,
+        target: &ElementTarget,
+        operation: &str,
+        arguments: &Value,
+        before_dispatch: Option<&(dyn Fn() + Send + Sync)>,
+    ) -> AbResult<Value> {
         Self::assert_live(context, target).await?;
         let mut action_sessions = context.iframe_sessions.clone();
         action_sessions.insert(target.frame_id.clone(), target.session_id.clone());
@@ -54,9 +84,19 @@ impl ActionRunner {
             Some(&target.frame_id),
         );
         let selector = format!("@{ref_id}");
+        if !matches!(operation, "click" | "dblclick") {
+            if let Some(before_dispatch) = before_dispatch {
+                before_dispatch();
+            }
+        }
         let result = match operation {
             "click" => {
-                let click = interaction::click(
+                let mark_dispatch = || {
+                    if let Some(before_dispatch) = before_dispatch {
+                        before_dispatch();
+                    }
+                };
+                let click = interaction::click_with_dispatch_hook(
                     &context.client,
                     &context.root_session_id,
                     &refs,
@@ -70,6 +110,7 @@ impl ActionRunner {
                         .and_then(Value::as_i64)
                         .unwrap_or(1) as i32,
                     &action_sessions,
+                    Some(&mark_dispatch),
                 )
                 .await
                 .map_err(|message| action_error("click", message))?;
@@ -84,12 +125,20 @@ impl ActionRunner {
                 })
             }
             "dblclick" => {
-                let click = interaction::dblclick(
+                let mark_dispatch = || {
+                    if let Some(before_dispatch) = before_dispatch {
+                        before_dispatch();
+                    }
+                };
+                let click = interaction::click_with_dispatch_hook(
                     &context.client,
                     &context.root_session_id,
                     &refs,
                     &selector,
+                    "left",
+                    2,
                     &action_sessions,
+                    Some(&mark_dispatch),
                 )
                 .await
                 .map_err(|message| action_error("dblclick", message))?;
@@ -856,11 +905,14 @@ fn string_array(value: &Value, field: &str, action: &str) -> AbResult<Vec<String
 }
 
 fn action_error(stage: &str, message: String) -> AbError {
-    let kind = if message.contains("covered by") {
+    let kind = if message.contains("covered by") || message.contains("intercepted by") {
         "action_intercepted"
     } else if message.contains("not editable") || message.contains("cannot be filled") {
         "element_not_editable"
-    } else if message.contains("Stale ref") || message.contains("stale") {
+    } else if message.contains("Stale ref")
+        || message.contains("stale")
+        || message.contains("detached from")
+    {
         "stale_ref"
     } else if message.contains("not found") {
         "action_target_unavailable"

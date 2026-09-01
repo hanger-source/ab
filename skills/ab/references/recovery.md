@@ -25,6 +25,7 @@ For an interrupted mutation, the request trace first records caller `settled` wi
 | `stale_viewport` | coordinates belong to older pixels | capture a new screenshot and use its `viewportId` |
 | `stale_dialog` | the dialog already closed or was replaced | inspect page state; do not accept/dismiss another dialog by assumption |
 | `resource_disposed` | the client object no longer owns a live server object | create a new object only if the task still needs it |
+| `action_intercepted` | the event-time pointer target was another element and AB blocked the wrong-target attempt before application handlers | observe the active surface, resolve the overlay or changed layout, then issue a new explicit action from fresh identity |
 
 ## Locator failures
 
@@ -32,7 +33,7 @@ A strict Locator failure is evidence about the query or page, not a request to f
 
 - zero matches: refresh/observe, check frame scope, name, role, and readiness;
 - multiple matches: add semantic scope, `filter()`, `locator()`, `and()`, or an intentional `nth()`;
-- not visible or not actionable: inspect overlays, disabled state, scroll, and current UI;
+- not visible, disabled, unstable, or not actionable: inspect overlays, current UI and whether the target is still moving; do not bypass the action boundary with DOM JavaScript;
 - detached during action: re-resolve the Locator after the rerender.
 
 Only use CSS when the page lacks a stable semantic identity. Only use evaluate/CDP when the desired operation is genuinely outside the typed surface.

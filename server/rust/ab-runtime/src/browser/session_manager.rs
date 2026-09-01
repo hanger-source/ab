@@ -5,6 +5,7 @@ use super::init_scripts::{
 };
 use crate::agent_browser_engine::cdp::client::CdpClient;
 use crate::agent_browser_engine::cdp::types::CdpEvent;
+use crate::agent_browser_engine::pointer_action;
 use crate::error::{AbError, AbResult};
 use futures_util::future::join_all;
 use serde::Serialize;
@@ -979,6 +980,16 @@ impl SessionManager {
                 .acquire(&record.session_id, domain, &baseline_owner)
                 .await?;
         }
+        // Register the new-document gate while an auto-attached OOPIF is still
+        // paused, but do not evaluate page code until after
+        // Runtime.runIfWaitingForDebugger. Awaiting Runtime.evaluate in a
+        // paused child session deadlocks its parent's load. See
+        // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+        // Executable OOPIF coverage:
+        // `test/ab/scenarios/oopif-session-registry/README.md`.
+        pointer_action::register_for_session(&self.client, &record.session_id)
+            .await
+            .map_err(|message| session_error("pointer_action.register", message))?;
         let active_features = self
             .feature_owners
             .lock()
@@ -1020,6 +1031,9 @@ impl SessionManager {
             .client
             .send_command_no_params("Runtime.runIfWaitingForDebugger", Some(&record.session_id))
             .await;
+        pointer_action::evaluate_current_for_session(&self.client, &record.session_id)
+            .await
+            .map_err(|message| session_error("pointer_action.evaluate_current", message))?;
         match self
             .client
             .send_command_no_params("Page.getFrameTree", Some(&record.session_id))

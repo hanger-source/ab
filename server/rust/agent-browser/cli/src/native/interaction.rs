@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::cdp::client::CdpClient;
 use super::cdp::types::*;
 use super::element::{resolve_element_center, resolve_element_object_id, RefMap};
+use super::pointer_action;
 
 /// Outcome of a click. `dialog_opened` is true if a JavaScript dialog opened
 /// mid-sequence (the page is then blocked until `dialog accept`/`dismiss`).
@@ -24,6 +25,7 @@ pub struct PendingRelease {
     pub x: f64,
     pub y: f64,
     pub button: String,
+    pub click_count: i32,
 }
 
 pub async fn click(
@@ -35,27 +37,85 @@ pub async fn click(
     click_count: i32,
     iframe_sessions: &HashMap<String, String>,
 ) -> Result<ClickResult, String> {
-    let (x, y, effective_session_id) = resolve_element_center(
+    click_with_dispatch_hook(
         client,
         session_id,
         ref_map,
         selector_or_ref,
-        iframe_sessions,
-    )
-    .await?;
-    // A click-triggered dialog can fire on the frame's own session (OOPIF) or
-    // on the top-level page session; both count as "ours". A dialog on any
-    // other session belongs to a background tab and must not abort this click.
-    dispatch_click(
-        client,
-        &effective_session_id,
-        &[effective_session_id.as_str(), session_id],
-        x,
-        y,
         button,
         click_count,
+        iframe_sessions,
+        None,
     )
     .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn click_with_dispatch_hook(
+    client: &CdpClient,
+    session_id: &str,
+    ref_map: &RefMap,
+    selector_or_ref: &str,
+    button: &str,
+    click_count: i32,
+    iframe_sessions: &HashMap<String, String>,
+    before_dispatch: Option<&(dyn Fn() + Send + Sync)>,
+) -> Result<ClickResult, String> {
+    let mut last_error = "pointer action did not produce a safe attempt".to_string();
+    let mut dispatch_started = false;
+    for attempt in 0..5 {
+        let prepared = match pointer_action::prepare(
+            client,
+            session_id,
+            ref_map,
+            selector_or_ref,
+            iframe_sessions,
+            attempt,
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
+
+        // A click-triggered dialog can fire on the frame's own session
+        // (OOPIF) or on the top-level page session; both count as ours. A
+        // dialog on another session belongs to a background tab.
+        if !dispatch_started {
+            if let Some(before_dispatch) = before_dispatch {
+                before_dispatch();
+            }
+            dispatch_started = true;
+        }
+        let dispatched = dispatch_click(
+            client,
+            &prepared.session_id,
+            &[prepared.session_id.as_str(), session_id],
+            prepared.x,
+            prepared.y,
+            button,
+            click_count,
+        )
+        .await;
+        let result = match dispatched {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = pointer_action::stop(client, &prepared).await;
+                return Err(error);
+            }
+        };
+        if result.dialog_opened {
+            return Ok(result);
+        }
+        match pointer_action::stop(client, &prepared).await {
+            Ok(()) => return Ok(result),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
 pub async fn dblclick(
@@ -1175,6 +1235,10 @@ async fn dispatch_click(
     button: &str,
     click_count: i32,
 ) -> Result<ClickResult, String> {
+    if click_count < 1 {
+        return Err("click count must be at least 1".to_string());
+    }
+
     // Move
     if let Some(dialog_event) = dispatch_mouse_or_dialog(
         client,
@@ -1208,64 +1272,76 @@ async fn dispatch_click(
         _ => 1,
     };
 
-    // Press
-    if let Some(dialog_event) = dispatch_mouse_or_dialog(
-        client,
-        session_id,
-        accept_sessions,
-        &DispatchMouseEventParams {
-            event_type: "mousePressed".to_string(),
-            x,
-            y,
-            button: Some(button.to_string()),
-            buttons: Some(button_value),
-            click_count: Some(click_count),
-            delta_x: None,
-            delta_y: None,
-            modifiers: None,
-        },
-    )
-    .await?
-    {
-        // Dialog opened from the mousedown handler: the button is held and the
-        // release will never arrive on its own. Hand the caller what it needs
-        // to release once the dialog is resolved.
-        return Ok(ClickResult {
-            dialog_opened: true,
-            dialog_event: Some(dialog_event),
-            pending_release: Some(PendingRelease {
-                session_id: session_id.to_string(),
+    // Browser click count is a sequence identity, not a shortcut that turns
+    // one press/release pair into N activations. Playwright and Puppeteer both
+    // dispatch one pair for each count so dblclick preserves the preceding
+    // click(detail=1) before click(detail=2) and dblclick(detail=2).
+    // Design and browser evidence:
+    // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+    for current_click_count in 1..=click_count {
+        if let Some(dialog_event) = dispatch_mouse_or_dialog(
+            client,
+            session_id,
+            accept_sessions,
+            &DispatchMouseEventParams {
+                event_type: "mousePressed".to_string(),
                 x,
                 y,
-                button: button.to_string(),
-            }),
-        });
+                button: Some(button.to_string()),
+                buttons: Some(button_value),
+                click_count: Some(current_click_count),
+                delta_x: None,
+                delta_y: None,
+                modifiers: None,
+            },
+        )
+        .await?
+        {
+            // Dialog opened from this mousedown handler: preserve the exact
+            // sequence count for the release dispatched after it is handled.
+            return Ok(ClickResult {
+                dialog_opened: true,
+                dialog_event: Some(dialog_event),
+                pending_release: Some(PendingRelease {
+                    session_id: session_id.to_string(),
+                    x,
+                    y,
+                    button: button.to_string(),
+                    click_count: current_click_count,
+                }),
+            });
+        }
+
+        // A dialog here fired from mouseup/click, after the button is already
+        // up. Stop the remaining multi-click sequence without manufacturing
+        // another activation behind the modal dialog.
+        if let Some(dialog_event) = dispatch_mouse_or_dialog(
+            client,
+            session_id,
+            accept_sessions,
+            &DispatchMouseEventParams {
+                event_type: "mouseReleased".to_string(),
+                x,
+                y,
+                button: Some(button.to_string()),
+                buttons: Some(0),
+                click_count: Some(current_click_count),
+                delta_x: None,
+                delta_y: None,
+                modifiers: None,
+            },
+        )
+        .await?
+        {
+            return Ok(ClickResult {
+                dialog_opened: true,
+                dialog_event: Some(dialog_event),
+                pending_release: None,
+            });
+        }
     }
 
-    // Release. A dialog here fired from the click/mouseup handler, which runs
-    // after the button is already up, so there is nothing left to release.
-    let dialog_event = dispatch_mouse_or_dialog(
-        client,
-        session_id,
-        accept_sessions,
-        &DispatchMouseEventParams {
-            event_type: "mouseReleased".to_string(),
-            x,
-            y,
-            button: Some(button.to_string()),
-            buttons: Some(0),
-            click_count: Some(click_count),
-            delta_x: None,
-            delta_y: None,
-            modifiers: None,
-        },
-    )
-    .await?;
-    Ok(ClickResult {
-        dialog_opened: dialog_event.is_some(),
-        dialog_event,
-        pending_release: None,
-    })
+    Ok(ClickResult::default())
 }
 
 /// Best-effort mouseReleased to clear a button left logically down when a
@@ -1283,7 +1359,7 @@ pub async fn dispatch_pending_release(
                 y: release.y,
                 button: Some(release.button.clone()),
                 buttons: Some(0),
-                click_count: Some(1),
+                click_count: Some(release.click_count),
                 delta_x: None,
                 delta_y: None,
                 modifiers: None,

@@ -240,8 +240,13 @@ try {
     const virtualInspection = await virtualOption.inspect();
     assert.equal(virtualInspection.visible, false);
     assert.equal(virtualInspection.bounds.width, 0);
-    await virtualOption.click();
-    assert.equal(await tab.evaluate(() => document.body.dataset.virtualChoice), "selected");
+    await assert.rejects(virtualOption.click(), (error: unknown) => {
+      assert(error instanceof ABError);
+      assert.equal(error.kind, "action_failed");
+      assert.equal(error.stage, "action.click");
+      return true;
+    });
+    assert.equal(await tab.evaluate(() => document.body.dataset.virtualChoice), undefined);
     await virtualState.dispose();
     await tab.getByLabel("choice").selectOption("b");
     await tab.getByLabel("enabled").check();

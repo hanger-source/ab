@@ -23,6 +23,8 @@ pub mod interaction;
 #[allow(dead_code)]
 pub mod network;
 #[allow(dead_code)]
+pub mod pointer_action;
+#[allow(dead_code)]
 pub mod policy;
 #[allow(dead_code)]
 pub mod providers;

@@ -21,7 +21,7 @@ bun test/ab/live-suite.ts --case dialog
 bun test/ab/live-suite.ts --case version-handover
 ```
 
-`dialog` remains a known headed-Chrome modal lifecycle failure: the existing reproduction can stop at the native modal. The runner terminates it after 45 seconds and reports failure; it must not be described as passed or allowed to block unrelated cases indefinitely.
+`dialog` remains a known headed-Chrome modal lifecycle failure: the existing reproduction can stop at the native modal. The runner terminates it after 15 seconds and reports failure; it must not be described as passed or allowed to block unrelated cases indefinitely.
 
 `version-handover` requires `AB_OLD_RUNTIME_BINARY` and `AB_OLD_BUILD_ID` so it can prove an actual old-to-current handover. A second copy of the current binary is not valid evidence.
 

@@ -146,6 +146,14 @@ pub struct DialogSubscription {
     pub receiver: broadcast::Receiver<DialogLifecycle>,
 }
 
+/// Owns one mutation from pre-dispatch browser observers through the final
+/// browser identity and optional post-action observation.
+///
+/// Design and evidence:
+/// `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+/// Deterministic timing regressions:
+/// `test/ab/scenarios/async-spa-navigation/README.md` and
+/// `test/ab/scenarios/animated-surface-dismissal/README.md`.
 struct ActionTransaction {
     id: String,
     action: String,
@@ -154,8 +162,27 @@ struct ActionTransaction {
     started_at: std::time::Instant,
     before_url: String,
     before_generation: String,
-    events: broadcast::Receiver<CdpEvent>,
+    root_frame_id: String,
+    events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
     deadline: Instant,
+}
+
+impl ActionTransaction {
+    fn mark_dispatch(&self, marker: &ActionDispatchMarker) {
+        let mut events = self.events.lock().expect("action event stream poisoned");
+        if let Some(receiver) = events.as_mut() {
+            *receiver = receiver.resubscribe();
+        }
+        marker.mark_started();
+    }
+
+    fn take_events(&self) -> broadcast::Receiver<CdpEvent> {
+        self.events
+            .lock()
+            .expect("action event stream poisoned")
+            .take()
+            .expect("action event stream already consumed")
+    }
 }
 
 impl BrowserCore {
@@ -435,7 +462,7 @@ impl BrowserCore {
         let transaction = self
             .begin_action(&context, operation, identity, deadline)
             .await?;
-        dispatch_marker.mark_started();
+        transaction.mark_dispatch(dispatch_marker);
         let dispatch = if operation == "click" {
             let click = interaction::click_at(
                 &context.client,
@@ -686,15 +713,21 @@ impl BrowserCore {
             .iter()
             .find(|frame| frame.id == target.frame_id)
             .unwrap_or(&context.root_frame);
+        let before_url = if frame.id == context.root_frame.id {
+            context.sessions.target(&context.target_id).await?.url
+        } else {
+            frame.url.clone()
+        };
         Ok(ActionTransaction {
             id,
             action: action.to_owned(),
             target,
             started_at_unix_ms: unix_ms(),
             started_at: std::time::Instant::now(),
-            before_url: frame.url.clone(),
+            before_url,
             before_generation: frame.document_generation.clone(),
-            events,
+            root_frame_id: context.root_frame.id.clone(),
+            events: Arc::new(std::sync::Mutex::new(Some(events))),
             deadline,
         })
     }
@@ -714,7 +747,7 @@ impl BrowserCore {
     async fn finish_action(
         &self,
         client_id: &str,
-        mut transaction: ActionTransaction,
+        transaction: ActionTransaction,
         lane: &TargetState,
         data: Value,
         baseline: Option<&crate::observation::ObservationRecord>,
@@ -732,10 +765,14 @@ impl BrowserCore {
                 return Err(error);
             }
         };
-        let file_chooser = collect_file_chooser(
+        let mut action_events = transaction.take_events();
+        let action_targets_root_frame = transaction.target.frame_id == transaction.root_frame_id;
+        let action_signals = collect_action_signals(
             self.owner.sessions(),
             &target_id,
-            &mut transaction.events,
+            &transaction.before_url,
+            action_targets_root_frame,
+            &mut action_events,
             deadline,
         )
         .await;
@@ -747,21 +784,13 @@ impl BrowserCore {
         let sessions = self.owner.sessions();
         let dialog = sessions.dialog_for_target(&target_id).await;
         let dialog_blocking = dialog_opened || dialog.is_some();
-        let after_frames = sessions.frames(&target_id).await;
-        let after_frame = after_frames
-            .iter()
-            .find(|frame| frame.id == transaction.target.frame_id);
-        let after_url = after_frame
-            .map(|frame| frame.url.clone())
-            .unwrap_or_else(|| transaction.before_url.clone());
-        let after_generation = after_frame
-            .map(|frame| frame.document_generation.clone())
-            .unwrap_or_else(|| transaction.before_generation.clone());
         let (observation, observation_outcome) = if observation_options.is_some()
             && !dialog_blocking
         {
             let capture = async {
                 let after_context = self.context(&target_id).await?;
+                settle_action_observation(&after_context, &transaction.target.frame_id, deadline)
+                    .await?;
                 let mut options = observation_options.expect("checked above").clone();
                 options.diff_from = baseline.map(|record| record.output.id.clone());
                 let record = observation_engine::capture(
@@ -803,6 +832,27 @@ impl BrowserCore {
         } else {
             (None, ActionObservationOutcome::not_requested())
         };
+        // Read the final frame identity only after both action-owned signals and the
+        // optional observation have settled. Reading it before capture made a
+        // successful asynchronous navigation look like an unchanged document.
+        let after_frames = sessions.frames(&target_id).await;
+        let after_frame = after_frames
+            .iter()
+            .find(|frame| frame.id == transaction.target.frame_id);
+        let after_url = if transaction.target.frame_id == transaction.root_frame_id {
+            sessions
+                .target(&target_id)
+                .await
+                .map(|target| target.url)
+                .unwrap_or_else(|_| transaction.before_url.clone())
+        } else {
+            after_frame
+                .map(|frame| frame.url.clone())
+                .unwrap_or_else(|| transaction.before_url.clone())
+        };
+        let after_generation = after_frame
+            .map(|frame| frame.document_generation.clone())
+            .unwrap_or_else(|| transaction.before_generation.clone());
         let ended_at_unix_ms = unix_ms();
         let duration_ms = transaction.started_at.elapsed().as_millis() as u64;
         Ok(ActionResult {
@@ -829,7 +879,7 @@ impl BrowserCore {
                 opened: dialog_blocking,
                 dialog,
             },
-            file_chooser,
+            file_chooser: action_signals.file_chooser,
             pending_release: lane.pending_release.is_some(),
             last_stage: observation_outcome.last_stage().to_owned(),
             observation_outcome,
@@ -954,11 +1004,20 @@ impl BrowserCore {
         let transaction = self
             .begin_action(&context, operation, identity, deadline)
             .await?;
-        dispatch_marker.mark_started();
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
+            transaction.mark_dispatch(dispatch_marker);
             ActionRunner::drag(&context, &target, drag_target).await
         } else {
-            ActionRunner::perform(&context, &mut lane, &target, operation, arguments).await
+            let before_dispatch = || transaction.mark_dispatch(dispatch_marker);
+            ActionRunner::perform_transaction(
+                &context,
+                &mut lane,
+                &target,
+                operation,
+                arguments,
+                &before_dispatch,
+            )
+            .await
         };
         let value = match outcome {
             Ok(value) => value,
@@ -1098,11 +1157,20 @@ impl BrowserCore {
         let transaction = self
             .begin_action(&context, action, identity, deadline)
             .await?;
-        dispatch_marker.mark_started();
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
+            transaction.mark_dispatch(dispatch_marker);
             ActionRunner::drag(&context, &target, drag_target).await
         } else {
-            ActionRunner::perform(&context, &mut lane, &target, action, params).await
+            let before_dispatch = || transaction.mark_dispatch(dispatch_marker);
+            ActionRunner::perform_transaction(
+                &context,
+                &mut lane,
+                &target,
+                action,
+                params,
+                &before_dispatch,
+            )
+            .await
         };
         let outcome = match outcome {
             Ok(outcome) => outcome,
@@ -1214,8 +1282,8 @@ impl BrowserCore {
                     let transaction = self
                         .begin_action(&context, &request.operation, identity, deadline)
                         .await?;
-                    dispatch_marker.mark_started();
                     let outcome = if request.operation == "drag" {
+                        transaction.mark_dispatch(dispatch_marker);
                         let drag_request = request
                             .arguments
                             .get("target")
@@ -1261,12 +1329,14 @@ impl BrowserCore {
                             Err(error) => Err(error),
                         }
                     } else {
-                        ActionRunner::perform(
+                        let before_dispatch = || transaction.mark_dispatch(dispatch_marker);
+                        ActionRunner::perform_transaction(
                             &context,
                             &mut lane,
                             &target,
                             &request.operation,
                             &request.arguments,
+                            &before_dispatch,
                         )
                         .await
                     };
@@ -2245,29 +2315,90 @@ fn returns_action_result(operation: &str) -> bool {
     )
 }
 
-async fn collect_file_chooser(
+struct ActionSignals {
+    file_chooser: FileChooserOutcome,
+}
+
+async fn collect_action_signals(
     sessions: Arc<super::session_manager::SessionManager>,
     target_id: &str,
+    before_url: &str,
+    action_targets_root_frame: bool,
     receiver: &mut broadcast::Receiver<CdpEvent>,
     request_deadline: Instant,
-) -> FileChooserOutcome {
+) -> ActionSignals {
     let available = request_deadline
         .saturating_duration_since(Instant::now())
         .saturating_sub(ACTION_RESPONSE_RESERVE);
     if available.is_zero() {
         let mut outcome = FileChooserOutcome::none();
         outcome.complete = false;
-        return outcome;
+        return ActionSignals {
+            file_chooser: outcome,
+        };
     }
-    let complete_window = available >= Duration::from_millis(75);
-    let deadline = Instant::now() + available.min(Duration::from_millis(75));
+
+    // An action owns the event receiver from before input dispatch. Give browser
+    // signals a short discovery window, then—only when the action actually
+    // caused navigation or relevant network work—wait for completion and a
+    // quiet period. This is event-driven action settlement, not a site delay.
+    const DISCOVERY_WINDOW: Duration = Duration::from_millis(100);
+    const QUIET_WINDOW: Duration = Duration::from_millis(100);
+    const MAX_SIGNAL_WAIT: Duration = Duration::from_secs(2);
+
+    let started = Instant::now();
+    let deadline = started + available.min(MAX_SIGNAL_WAIT);
+    let mut discovery_deadline = started + available.min(DISCOVERY_WINDOW);
+    let mut activity_seen = false;
+    let mut quiet_since: Option<Instant> = None;
+    let mut pending_requests = HashSet::<String>::new();
+    let mut file_chooser = FileChooserOutcome::none();
+    let mut navigation_committed = false;
+
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return FileChooserOutcome::none();
+        let now = Instant::now();
+        if action_targets_root_frame
+            && !navigation_committed
+            && sessions
+                .target(target_id)
+                .await
+                .is_ok_and(|target| target.url != before_url)
+        {
+            navigation_committed = true;
+            activity_seen = true;
+            pending_requests.clear();
+            quiet_since = Some(now);
         }
+        if !activity_seen && now >= discovery_deadline {
+            return ActionSignals { file_chooser };
+        }
+        if activity_seen
+            && pending_requests.is_empty()
+            && quiet_since
+                .is_some_and(|quiet_start| now.duration_since(quiet_start) >= QUIET_WINDOW)
+        {
+            return ActionSignals { file_chooser };
+        }
+
+        let wake_at = if !activity_seen {
+            discovery_deadline.min(deadline)
+        } else if pending_requests.is_empty() {
+            quiet_since
+                .map(|quiet_start| (quiet_start + QUIET_WINDOW).min(deadline))
+                .unwrap_or(deadline)
+        } else {
+            deadline
+        };
+        let remaining = wake_at.saturating_duration_since(now);
+        if remaining.is_zero() {
+            if Instant::now() >= deadline {
+                file_chooser.complete = false;
+            }
+            return ActionSignals { file_chooser };
+        }
+
         match timeout(remaining, receiver.recv()).await {
-            Ok(Ok(event)) if event.method == "Page.fileChooserOpened" => {
+            Ok(Ok(event)) => {
                 let Some(session_id) = event.session_id else {
                     continue;
                 };
@@ -2277,37 +2408,99 @@ async fn collect_file_chooser(
                 {
                     continue;
                 }
-                return FileChooserOutcome {
-                    opened: true,
-                    complete: true,
-                    session_id: Some(session_id),
-                    frame_id: event
-                        .params
-                        .get("frameId")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    backend_node_id: event.params.get("backendNodeId").and_then(Value::as_i64),
-                    mode: event
-                        .params
-                        .get("mode")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                };
+
+                match event.method.as_str() {
+                    "Page.fileChooserOpened" => {
+                        file_chooser = FileChooserOutcome {
+                            opened: true,
+                            complete: true,
+                            session_id: Some(session_id),
+                            frame_id: event
+                                .params
+                                .get("frameId")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            backend_node_id: event
+                                .params
+                                .get("backendNodeId")
+                                .and_then(Value::as_i64),
+                            mode: event
+                                .params
+                                .get("mode")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                        };
+                    }
+                    "Network.requestWillBeSent"
+                        if !navigation_committed && is_action_network_request(&event.params) =>
+                    {
+                        if let Some(request_id) =
+                            event.params.get("requestId").and_then(Value::as_str)
+                        {
+                            pending_requests.insert(request_id.to_owned());
+                        }
+                        activity_seen = true;
+                        quiet_since = None;
+                    }
+                    "Network.loadingFinished" | "Network.loadingFailed"
+                        if !navigation_committed =>
+                    {
+                        let removed = event
+                            .params
+                            .get("requestId")
+                            .and_then(Value::as_str)
+                            .is_some_and(|request_id| pending_requests.remove(request_id));
+                        if removed && pending_requests.is_empty() {
+                            quiet_since = Some(Instant::now());
+                        }
+                    }
+                    method if is_action_page_signal(method) => {
+                        activity_seen = true;
+                        if pending_requests.is_empty() {
+                            quiet_since = Some(Instant::now());
+                        }
+                    }
+                    _ => {}
+                }
+
+                if activity_seen {
+                    discovery_deadline = deadline;
+                }
             }
-            Ok(Ok(_)) => {}
             Ok(Err(broadcast::error::RecvError::Lagged(_)))
             | Ok(Err(broadcast::error::RecvError::Closed)) => {
-                let mut outcome = FileChooserOutcome::none();
-                outcome.complete = false;
-                return outcome;
+                file_chooser.complete = false;
+                return ActionSignals { file_chooser };
             }
             Err(_) => {
-                let mut outcome = FileChooserOutcome::none();
-                outcome.complete = complete_window;
-                return outcome;
+                if Instant::now() >= deadline {
+                    file_chooser.complete = false;
+                }
+                return ActionSignals { file_chooser };
             }
         }
     }
+}
+
+fn is_action_network_request(params: &Value) -> bool {
+    matches!(
+        params.get("type").and_then(Value::as_str),
+        Some("Document" | "XHR" | "Fetch")
+    )
+}
+
+fn is_action_page_signal(method: &str) -> bool {
+    matches!(
+        method,
+        "Page.frameRequestedNavigation"
+            | "Page.frameStartedLoading"
+            | "Page.frameNavigated"
+            | "Page.navigatedWithinDocument"
+            | "Page.frameStoppedLoading"
+            | "Page.domContentEventFired"
+            | "Page.loadEventFired"
+            | "Page.lifecycleEvent"
+    )
 }
 
 async fn document_ready_state(context: &TargetContext, deadline: Instant) -> Option<String> {
@@ -2332,6 +2525,218 @@ async fn document_ready_state(context: &TargetContext, deadline: Instant) -> Opt
         .pointer("/result/value")
         .and_then(Value::as_str)
         .map(str::to_owned)
+}
+
+async fn settle_action_observation(
+    context: &TargetContext,
+    action_frame_id: &str,
+    deadline: Instant,
+) -> AbResult<()> {
+    // Why this is a bounded rendering settle instead of a generic page-idle
+    // promise:
+    // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+    // Executable timing case:
+    // `test/ab/scenarios/animated-surface-dismissal/README.md`.
+    let frame = context
+        .frames
+        .iter()
+        .find(|frame| frame.id == action_frame_id)
+        .unwrap_or(&context.root_frame);
+    let available = deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(ACTION_RESPONSE_RESERVE);
+    if available < ACTION_OBSERVATION_SETTLE_MINIMUM {
+        return Err(AbError::new(
+            "timeout",
+            "action.observation.settle.deadline",
+            "request deadline left no time to settle the page before post-action observation",
+        ));
+    }
+
+    let world_budget = available.min(Duration::from_millis(100));
+    let world = context
+        .client
+        .send_command_with_timeout(
+            "Page.createIsolatedWorld",
+            Some(json!({
+                "frameId": frame.id,
+                "worldName": "ab-action-observation-settle-v1",
+                "grantUniveralAccess": false,
+            })),
+            Some(&frame.session_id),
+            world_budget,
+        )
+        .await
+        .map_err(|message| {
+            AbError::new("browser_error", "action.observation.settle.world", message)
+        })?;
+    let context_id = world
+        .get("executionContextId")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            AbError::new(
+                "browser_error",
+                "action.observation.settle.world",
+                "isolated settle world has no executionContextId",
+            )
+        })?;
+
+    let settle_deadline = Instant::now()
+        + deadline
+            .saturating_duration_since(Instant::now())
+            .saturating_sub(ACTION_RESPONSE_RESERVE)
+            .min(ACTION_OBSERVATION_SETTLE_MAXIMUM);
+    let start = action_observation_settle_sample(
+        context,
+        &frame.session_id,
+        context_id,
+        true,
+        settle_deadline,
+    )
+    .await?;
+    let mut previous_revision = start.0;
+    let mut last_mutation_at = Instant::now();
+    let mut stable_samples = 0;
+    while Instant::now() < settle_deadline {
+        sleep(ACTION_OBSERVATION_SETTLE_POLL).await;
+        if Instant::now() >= settle_deadline {
+            break;
+        }
+        let (revision, running_finite_animations) = action_observation_settle_sample(
+            context,
+            &frame.session_id,
+            context_id,
+            false,
+            settle_deadline,
+        )
+        .await?;
+        if revision != previous_revision {
+            previous_revision = revision;
+            last_mutation_at = Instant::now();
+            stable_samples = 0;
+            continue;
+        }
+        if running_finite_animations == 0
+            && last_mutation_at.elapsed() >= ACTION_OBSERVATION_SETTLE_QUIET
+        {
+            stable_samples += 1;
+            if stable_samples >= 2 {
+                break;
+            }
+        } else {
+            stable_samples = 0;
+        }
+    }
+    let _ =
+        action_observation_settle_cleanup(context, &frame.session_id, context_id, deadline).await;
+    Ok(())
+}
+
+async fn action_observation_settle_sample(
+    context: &TargetContext,
+    session_id: &str,
+    context_id: i64,
+    initialize: bool,
+    settle_deadline: Instant,
+) -> AbResult<(u64, u64)> {
+    let remaining = settle_deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(AbError::new(
+            "timeout",
+            "action.observation.settle.deadline",
+            "post-action observation settle exceeded its bounded runtime window",
+        ));
+    }
+    let expression = if initialize {
+        r#"(() => {
+          globalThis.__abActionObservationSettle?.observer.disconnect();
+          const state = { revision: 0 };
+          state.observer = new MutationObserver(() => { state.revision += 1 });
+          state.observer.observe(document, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            characterData: true
+          });
+          globalThis.__abActionObservationSettle = state;
+          const animations = document.getAnimations({ subtree: true }).filter(animation => {
+            if (animation.playState !== 'running' && animation.playState !== 'pending') return false;
+            return Number.isFinite(animation.effect?.getComputedTiming?.().endTime);
+          }).length;
+          return { revision: state.revision, animations };
+        })()"#
+    } else {
+        r#"(() => {
+          const state = globalThis.__abActionObservationSettle;
+          const animations = document.getAnimations({ subtree: true }).filter(animation => {
+            if (animation.playState !== 'running' && animation.playState !== 'pending') return false;
+            return Number.isFinite(animation.effect?.getComputedTiming?.().endTime);
+          }).length;
+          return { revision: state?.revision ?? 0, animations };
+        })()"#
+    };
+    let result = context
+        .client
+        .send_command_with_timeout(
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": expression,
+                "contextId": context_id,
+                "returnByValue": true,
+                "awaitPromise": false,
+            })),
+            Some(session_id),
+            remaining.min(Duration::from_millis(100)),
+        )
+        .await
+        .map_err(|message| {
+            AbError::new(
+                "browser_error",
+                "action.observation.settle.evaluate",
+                message,
+            )
+        })?;
+    if let Some(exception) = result.get("exceptionDetails") {
+        return Err(AbError::new(
+            "browser_error",
+            "action.observation.settle.evaluate",
+            exception.to_string(),
+        ));
+    }
+    let value = result.get("result").and_then(|value| value.get("value"));
+    Ok((
+        value
+            .and_then(|value| value.get("revision"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        value
+            .and_then(|value| value.get("animations"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    ))
+}
+
+async fn action_observation_settle_cleanup(
+    context: &TargetContext,
+    session_id: &str,
+    context_id: i64,
+    deadline: Instant,
+) -> Result<Value, String> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    context
+        .client
+        .send_command_with_timeout(
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": "globalThis.__abActionObservationSettle?.observer.disconnect(); delete globalThis.__abActionObservationSettle",
+                "contextId": context_id,
+                "returnByValue": true,
+                "awaitPromise": false,
+            })),
+            Some(session_id),
+            remaining.min(Duration::from_millis(50)),
+        )
+        .await
 }
 
 fn lifecycle_state_reached(wait_until: &str, ready_state: &str) -> bool {
@@ -2359,6 +2764,10 @@ fn unix_ms() -> u64 {
 
 const LOCATOR_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 const ACTION_RESPONSE_RESERVE: Duration = Duration::from_millis(25);
+const ACTION_OBSERVATION_SETTLE_MINIMUM: Duration = Duration::from_millis(48);
+const ACTION_OBSERVATION_SETTLE_MAXIMUM: Duration = Duration::from_millis(450);
+const ACTION_OBSERVATION_SETTLE_POLL: Duration = Duration::from_millis(32);
+const ACTION_OBSERVATION_SETTLE_QUIET: Duration = Duration::from_millis(32);
 
 fn locator_retry_budget_exhausted(deadline: Instant) -> bool {
     deadline.saturating_duration_since(Instant::now()) <= LOCATOR_RETRY_INTERVAL
@@ -2394,6 +2803,7 @@ fn retryable_resolution(error: &AbError) -> bool {
 
 fn retryable_action(error: &AbError) -> bool {
     error.kind == "action_target_unavailable"
+        || (error.kind == "stale_ref" && error.message.contains("detached from"))
 }
 
 fn browser_error(stage: &str, message: impl Into<String>) -> AbError {
