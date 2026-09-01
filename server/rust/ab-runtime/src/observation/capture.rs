@@ -8,6 +8,11 @@ use crate::observation::{ObservationRecord, SnapshotOptions, COMPUTED_STYLES};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+struct ActiveSurface {
+    backend_ids: HashSet<i64>,
+    root_backend_node_id: i64,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn capture(
     context: &TargetContext,
@@ -103,7 +108,7 @@ async fn capture_inner(
         &mut refs,
         snapshot_frame_id,
         &context.iframe_sessions,
-        active_surface.as_ref(),
+        active_surface.as_ref().map(|surface| &surface.backend_ids),
     )
     .await
     .map_err(|message| observation_error("ax.capture", message))?;
@@ -145,6 +150,28 @@ async fn capture_inner(
     }
     let dom_snapshots = capture_dom_snapshots(context).await?;
     let pierced_dom = capture_pierced_dom(context).await?;
+    let root_backend_node_id = active_surface
+        .as_ref()
+        .map(|surface| surface.root_backend_node_id)
+        .or_else(|| {
+            pierced_dom
+                .root_backend_nodes
+                .get(&context.root_session_id)
+                .copied()
+        })
+        .ok_or_else(|| {
+            AbError::new(
+                "observation_consistency_error",
+                "observation.surface.identity",
+                "effective surface resolved without a root backend node identity",
+            )
+        })?;
+    let surface_identity = super::model::ObservationSurfaceIdentity {
+        session_id: context.root_session_id.clone(),
+        frame_id: context.root_frame.id.clone(),
+        document_generation: context.root_frame.document_generation.clone(),
+        root_backend_node_id,
+    };
     let observation_frames = context
         .frames
         .iter()
@@ -168,13 +195,14 @@ async fn capture_inner(
         &pierced_dom,
         &dom_snapshots,
         effective_surface,
+        surface_identity,
     );
     hydrate_ref_bounds(context, &mut record).await;
     retain_refs(context, &mut record).await?;
     Ok(record)
 }
 
-async fn resolve_active_surface(context: &TargetContext) -> AbResult<Option<HashSet<i64>>> {
+async fn resolve_active_surface(context: &TargetContext) -> AbResult<Option<ActiveSurface>> {
     let result = context
         .client
         .send_command(
@@ -291,6 +319,16 @@ async fn resolve_active_surface(context: &TargetContext) -> AbResult<Option<Hash
         )
         .await;
     let described = described?;
+    let root_backend_node_id = described
+        .pointer("/node/backendNodeId")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            AbError::new(
+                "observation_consistency_error",
+                "observation.active_surface.identity",
+                "active surface resolved without a root backend node identity",
+            )
+        })?;
     let mut backend_ids = HashSet::new();
     collect_backend_ids(&described, &mut backend_ids);
     if backend_ids.is_empty() {
@@ -300,7 +338,10 @@ async fn resolve_active_surface(context: &TargetContext) -> AbResult<Option<Hash
             "active surface resolved without a DOM subtree identity",
         ));
     }
-    Ok(Some(backend_ids))
+    Ok(Some(ActiveSurface {
+        backend_ids,
+        root_backend_node_id,
+    }))
 }
 
 fn collect_backend_ids(value: &Value, output: &mut HashSet<i64>) {
@@ -507,7 +548,20 @@ async fn capture_pierced_dom(context: &TargetContext) -> AbResult<super::DomTree
             )
             .await
             .map_err(|message| observation_error("dom.pierce", message))?;
+        let root_backend_node_id = document
+            .pointer("/root/backendNodeId")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                AbError::new(
+                    "observation_consistency_error",
+                    "observation.dom.root_identity",
+                    "document capture returned no root backend node identity",
+                )
+            })?;
         summary.session_count += 1;
+        summary
+            .root_backend_nodes
+            .insert(session_id.clone(), root_backend_node_id);
         collect_dom_identity(&document, &session_id, &mut summary);
     }
     Ok(summary)

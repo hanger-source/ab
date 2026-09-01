@@ -40,6 +40,7 @@ pub fn build_record(
     pierced_dom: &DomTreeSummary,
     dom_snapshots: &[DomSnapshotCapture],
     surface: super::model::ObservationSurface,
+    surface_identity: super::model::ObservationSurfaceIdentity,
 ) -> ObservationRecord {
     let dom_info = parse_dom_snapshots(dom_snapshots);
     let frame_identities = frames
@@ -147,6 +148,7 @@ pub fn build_record(
             captured_frame_count,
             gaps,
             surface,
+            surface_identity,
         },
         diff: None,
     };

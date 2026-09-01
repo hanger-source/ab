@@ -53,6 +53,7 @@ export type AgentTextPresentation = {
   observationId: string | null;
   text: string;
   untrusted: boolean;
+  presentation?: "full" | "incremental" | "document-replacement" | "surface-replacement";
 };
 
 export type AgentImagePresentation = {
@@ -208,7 +209,10 @@ async function readDocumentation(topic: AgentDocumentationTopic): Promise<string
 
 function formatTextPresentation(value: AgentTextPresentation): string {
   const boundary = value.untrusted ? "AB_UNTRUSTED_BROWSER_CONTENT" : "AB_DOCUMENTATION";
-  return `<<<${boundary} origin=${JSON.stringify(value.origin)} observation=${JSON.stringify(value.observationId)}>>>\n${value.text}\n<<<END_${boundary}>>>\n`;
+  const presentation = value.presentation === undefined
+    ? ""
+    : ` presentation=${JSON.stringify(value.presentation)}`;
+  return `<<<${boundary} origin=${JSON.stringify(value.origin)} observation=${JSON.stringify(value.observationId)}${presentation}>>>\n${value.text}\n<<<END_${boundary}>>>\n`;
 }
 
 function formatScreenshotPresentation(value: AgentImagePresentation): string {
@@ -552,15 +556,23 @@ export class AgentAX {
   }
 
   #presentState(state: AXState): Promise<void> | void {
-    const text = state.diff && !state.diff.documentReplaced
+    const text = state.diff && !state.diff.documentReplaced && !state.diff.surfaceReplaced
       ? state.diff.text || "No accessibility-tree text changed after the action."
       : state.text;
+    const presentation = state.diff?.documentReplaced
+      ? "document-replacement"
+      : state.diff?.surfaceReplaced
+        ? "surface-replacement"
+        : state.diff
+          ? "incremental"
+          : "full";
     return this.#presenter.presentText({
       kind: "ax",
       origin: this.#tab.url,
       observationId: state.id,
       text,
       untrusted: true,
+      presentation,
     });
   }
 

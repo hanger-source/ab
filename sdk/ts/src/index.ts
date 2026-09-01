@@ -97,6 +97,7 @@ export {
   type ObservationGap,
   type ObservationRef,
   type ObservationSources,
+  type ObservationSurfaceIdentity,
   type SnapshotOptions,
   type TypeOptions,
 } from "./ax/index.js";

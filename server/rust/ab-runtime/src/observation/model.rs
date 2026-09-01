@@ -123,6 +123,7 @@ pub struct PublicRef {
 pub struct ObservationDiff {
     pub from_observation_id: String,
     pub document_replaced: bool,
+    pub surface_replaced: bool,
     pub text: String,
     pub additions: usize,
     pub removals: usize,
@@ -163,6 +164,16 @@ pub struct ObservationSources {
     pub captured_frame_count: usize,
     pub gaps: Vec<ObservationGap>,
     pub surface: ObservationSurface,
+    pub surface_identity: ObservationSurfaceIdentity,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservationSurfaceIdentity {
+    pub session_id: String,
+    pub frame_id: String,
+    pub document_generation: String,
+    pub root_backend_node_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,6 +214,7 @@ pub struct DomTreeSummary {
     pub session_count: usize,
     pub shadow_root_count: usize,
     pub backend_nodes: HashSet<NodeIdentity>,
+    pub root_backend_nodes: HashMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

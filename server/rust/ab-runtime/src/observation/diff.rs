@@ -6,15 +6,17 @@ pub(super) fn build_diff(
     previous: &ObservationRecord,
     current: &ObservationOutput,
 ) -> ObservationDiff {
-    let text_diff = diff_snapshots(&previous.output.text, &current.text);
     let document_replaced = previous.output.document_generation != current.document_generation;
-    if document_replaced {
+    let surface_replaced = !document_replaced
+        && previous.output.sources.surface_identity != current.sources.surface_identity;
+    if document_replaced || surface_replaced {
         return ObservationDiff {
             from_observation_id: previous.output.id.clone(),
-            document_replaced: true,
+            document_replaced,
+            surface_replaced,
             text: current.text.clone(),
-            additions: text_diff.additions,
-            removals: text_diff.removals,
+            additions: current.text.lines().count(),
+            removals: previous.output.text.lines().count(),
             added_refs: sorted_ids(current.refs.iter().map(|entry| entry.id.clone()).collect()),
             removed_refs: sorted_ids(
                 previous
@@ -27,6 +29,8 @@ pub(super) fn build_diff(
             changed_refs: Vec::new(),
         };
     }
+
+    let text_diff = diff_snapshots(&previous.output.text, &current.text);
 
     let previous_by_identity = refs_by_identity(&previous.output.refs);
     let current_by_identity = refs_by_identity(&current.refs);
@@ -54,6 +58,7 @@ pub(super) fn build_diff(
     ObservationDiff {
         from_observation_id: previous.output.id.clone(),
         document_replaced: false,
+        surface_replaced: false,
         text: text_diff.diff,
         additions: text_diff.additions,
         removals: text_diff.removals,

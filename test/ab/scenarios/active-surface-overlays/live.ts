@@ -27,6 +27,39 @@ const pages = new Map<string, string>([
         </section>
       </div>
     </body></html>`],
+  ["/surface-transitions", `<!doctype html><html><head><title>Surface transitions</title>
+    <style>
+      .surface { position:fixed;inset:0;background:white;padding:32px;z-index:10 }
+      .login { z-index:20 }
+      [hidden] { display:none }
+    </style></head>
+    <body>
+      <button id="open-content">Open content</button>
+      <p id="document-status">Document ready</p>
+      <section id="content" class="surface" role="dialog" aria-modal="true" hidden>
+        <h1>Content surface</h1>
+        <p id="content-status">Content ready</p>
+        <button id="mutate-content">Change content</button>
+        <button id="open-login">Open login</button>
+        <button id="close-content">Close content</button>
+      </section>
+      <section id="login" class="surface login" role="dialog" aria-modal="true" hidden>
+        <h1>Login surface</h1>
+        <label>Email <input></label>
+        <button id="close-login">Close login</button>
+      </section>
+      <script>
+        const content = document.querySelector('#content');
+        const login = document.querySelector('#login');
+        document.querySelector('#open-content').onclick = () => { content.hidden = false };
+        document.querySelector('#mutate-content').onclick = () => {
+          document.querySelector('#content-status').textContent = 'Content changed';
+        };
+        document.querySelector('#open-login').onclick = () => { login.hidden = false };
+        document.querySelector('#close-login').onclick = () => { login.hidden = true };
+        document.querySelector('#close-content').onclick = () => { content.hidden = true };
+      </script>
+    </body></html>`],
 ]);
 const server = http.createServer((request, response) => {
   const page = pages.get(request.url ?? "");
@@ -65,15 +98,85 @@ try {
   assert(absolute.text.includes("Continue tutorial"), absolute.text);
   assert(!absolute.text.includes("Covered document action"), absolute.text);
 
+  await tab.navigate(`${baseUrl}/surface-transitions`);
+  const documentState = await tab.ax.snapshot({ mode: "full", surface: "active" });
+  assert.equal(documentState.sources.surface, "document");
+  assert(documentState.text.includes("Document ready"), documentState.text);
+
+  await tab.getByRole("button", { name: "Open content", exact: true }).click({ observe: "none" });
+  const contentState = await tab.ax.snapshot({
+    mode: "full",
+    surface: "active",
+    diffFrom: documentState,
+  });
+  assert.equal(contentState.sources.surface, "active");
+  assert.equal(contentState.diff?.documentReplaced, false);
+  assert.equal(contentState.diff?.surfaceReplaced, true);
+  assert.equal(contentState.diff?.text, contentState.text);
+  assert(contentState.text.includes("Content surface"), contentState.text);
+  assert(!contentState.diff?.text.includes("--- before"), contentState.diff?.text);
+
+  await tab.getByRole("button", { name: "Change content", exact: true }).click({ observe: "none" });
+  const changedContentState = await tab.ax.snapshot({
+    mode: "full",
+    surface: "active",
+    diffFrom: contentState,
+  });
+  assert.equal(changedContentState.diff?.surfaceReplaced, false);
+  assert(changedContentState.diff?.text.includes("Content changed"), changedContentState.diff?.text);
+  assert(changedContentState.diff?.text.includes("--- before"), changedContentState.diff?.text);
+
+  await tab.getByRole("button", { name: "Open login", exact: true }).click({ observe: "none" });
+  const loginState = await tab.ax.snapshot({
+    mode: "full",
+    surface: "active",
+    diffFrom: changedContentState,
+  });
+  assert.equal(loginState.diff?.surfaceReplaced, true);
+  assert(loginState.text.includes("Login surface"), loginState.text);
+  assert(!loginState.text.includes("Content surface"), loginState.text);
+
+  await tab.getByRole("button", { name: "Close login", exact: true }).click({ observe: "none" });
+  const returnedContentState = await tab.ax.snapshot({
+    mode: "full",
+    surface: "active",
+    diffFrom: loginState,
+  });
+  assert.equal(returnedContentState.diff?.surfaceReplaced, true);
+  assert(returnedContentState.text.includes("Content changed"), returnedContentState.text);
+
+  await tab.getByRole("button", { name: "Close content", exact: true }).click({ observe: "none" });
+  const returnedDocumentState = await tab.ax.snapshot({
+    mode: "full",
+    surface: "active",
+    diffFrom: returnedContentState,
+  });
+  assert.equal(returnedDocumentState.sources.surface, "document");
+  assert.equal(returnedDocumentState.diff?.surfaceReplaced, true);
+  assert(returnedDocumentState.text.includes("Document ready"), returnedDocumentState.text);
+
   console.log(JSON.stringify({
     scenario: "active-surface-overlays",
     surfaces: {
       emptyOverlay: empty.sources.surface,
       fixedEditor: fixed.sources.surface,
       absoluteOverlay: absolute.sources.surface,
+      transitions: {
+        documentToContent: contentState.diff?.surfaceReplaced,
+        contentMutation: changedContentState.diff?.surfaceReplaced,
+        contentToLogin: loginState.diff?.surfaceReplaced,
+        loginToContent: returnedContentState.diff?.surfaceReplaced,
+        contentToDocument: returnedDocumentState.diff?.surfaceReplaced,
+      },
     },
   }, null, 2));
 
+  await returnedDocumentState.dispose();
+  await returnedContentState.dispose();
+  await loginState.dispose();
+  await changedContentState.dispose();
+  await contentState.dispose();
+  await documentState.dispose();
   await absolute.dispose();
   await fixed.dispose();
   await empty.dispose();
