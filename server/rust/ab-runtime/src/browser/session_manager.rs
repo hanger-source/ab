@@ -956,6 +956,10 @@ impl SessionManager {
 
     async fn finish_register_target(self: &Arc<Self>, record: TargetSession) -> AbResult<()> {
         if let Err(error) = self.initialize_session(&record).await {
+            eprintln!(
+                "[ab.session] attach failed target_id={} session_id={} root_target_id={} error={}",
+                record.target_id, record.session_id, record.root_target_id, error
+            );
             self.remove_session(&record.session_id).await;
             return Err(error);
         }
@@ -975,11 +979,6 @@ impl SessionManager {
 
     async fn initialize_session(&self, record: &TargetSession) -> AbResult<()> {
         let baseline_owner = format!("baseline:{}", record.session_id);
-        for domain in ["Page", "Runtime", "Network"] {
-            self.domains
-                .acquire(&record.session_id, domain, &baseline_owner)
-                .await?;
-        }
         // Register the new-document gate while an auto-attached OOPIF is still
         // paused, but do not evaluate page code until after
         // Runtime.runIfWaitingForDebugger. Awaiting Runtime.evaluate in a
@@ -1027,10 +1026,27 @@ impl SessionManager {
                 .install_for_session(&owner, &record.session_id, false)
                 .await?;
         }
-        let _ = self
-            .client
-            .send_command_no_params("Runtime.runIfWaitingForDebugger", Some(&record.session_id))
-            .await;
+
+        // A top-level `target=_blank` page and an OOPIF both arrive paused.
+        // Page/Runtime/Network initialization and resume are one browser
+        // handshake: waiting for any individual domain before sending resume
+        // can deadlock the opener's trusted click. Queue every domain command,
+        // then resume without waiting for Chrome to acknowledge that best-effort
+        // command. Playwright uses the same concurrent initialization shape and
+        // agent-browser likewise sends runIfWaitingForDebugger without awaiting
+        // its response. The linked evidence records the signed-in Xiaohongshu
+        // reproduction and the deterministic popup regression.
+        let baseline = self
+            .domains
+            .acquire_initial_baseline(&record.session_id, &baseline_owner);
+        let resume = self.client.send_command_no_wait(
+            "Runtime.runIfWaitingForDebugger",
+            None,
+            Some(&record.session_id),
+        );
+        let (baseline, resume) = tokio::join!(biased; baseline, resume);
+        resume.map_err(|message| session_error("target.resume", message))?;
+        baseline?;
         pointer_action::evaluate_current_for_session(&self.client, &record.session_id)
             .await
             .map_err(|message| session_error("pointer_action.evaluate_current", message))?;

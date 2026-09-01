@@ -177,7 +177,17 @@ dispatch 后，同一 receiver 同时处理 file chooser、navigation page signa
 
 真实的持久 profile 多 tab 场景随后证伪了页面 `requestAnimationFrame` 作为稳定性时钟：小红书详情页处于 `document.visibilityState="hidden"` 时，同一个可见作者链接的两帧采样可以一直不返回，动作尚未 dispatch 就耗尽请求 deadline；当 Node REPL 外层同为 30 秒时，宿主先重置 JavaScript kernel。未修改的 agent-browser 0.35.1 在同一链接上还会把 `target=_blank` popup 留成暂停的空 target 并卡住 CLI；Playwright 1.62.1 连接同一 Chrome、点击同一坐标时 120ms 返回，即使页面没有实际产生 popup，也不把缺失的新页当作 input 尚未完成。
 
+随后通过 Git 中与现场 daemon 完全同源的 `ee830113781e06bf` Skill 再次连接固定 profile，原样执行 DeepSeek 报告的作者链接流程。fresh AX observation 中作者名仍是可见、enabled 的 `<a target="_blank">`，只是本轮 ref 为 `e4`。后台状态下 `ax.click("e4", { write: "state", maxChars: 4000 })` 在 30048ms 以 `cancelled/request.deadline` 结束；同页探针确认 `visibilityState="hidden"`，750ms timer 胜出而 `requestAnimationFrame` 未执行。激活 tab 后 rAF 在 0.6ms 返回，同一新鲜 ref 的点击已经由 `cdp.pointer` 完成，但整个事务仍耗时 30244ms，`ActionResult.lastStage="action.post_observation.failed"`，`observationOutcome.error.stage="action.observation.deadline"`。
+
+第二次现场不是 AX 本身慢。点击后 Chrome 原始 target 列表出现一个 `title=""、url=""` 的 page，而 AB `tabs.list()` 不发布它；daemon 日志对该 session 只有 `detach`，没有 `attach ready`。直接向这个 task-created target 发送 `Runtime.runIfWaitingForDebugger` 也在 5 秒内没有响应。它说明 source action 已经创建 child，但 browser-level auto-attach 将新页暂停后，AB 串行等待 Page/Runtime/Network 初始化与 resume，形成 opener input、paused child、session readiness 之间的等待环。检查结束后只关闭了该空 target，原详情页和固定登录态保留。
+
 因此稳定性仍属于 Pointer Action owner，但时钟不再属于页面。当前实现先同步检查 connected/visible/enabled 并滚动，再由 Rust 间隔 16ms 读取两次 `DOM.getContentQuads`；任一点移动超过 0.25 CSS px 仍分类为 `element is not stable` 并进入既有安全重试。这里没有移除 actionability、增加 DOM click fallback、等待固定业务结果或加入站点规则。popup/auto-attach 与 post-action observation 仍是相邻但独立的 owner，不能借这次修改一起掩盖。
+
+popup 的修正落在 SessionManager，而不是 ActionTransaction：新 document gate、现有 init script 与拦截能力仍在 resume 前登记；Page、Runtime、Network 三个 baseline domain command 随后作为同一初始化批次进入 flight，并与 no-wait `Runtime.runIfWaitingForDebugger` 一起发送。只有这些命令完成、current document gate 已安装且 frame tree 已读到后，session 才发布 `attach ready`。这个顺序对应 Playwright 的并发 page 初始化，也沿用 agent-browser 对 auto-attached session 的 no-wait resume；没有让 action 猜 popup、延长 deadline 或忽略 observation 失败。
+
+`test/ab/scenarios/popup-target-initialization/` 保存了由上述认证现场缩减出的 CDP 生命周期：trusted author-link handler 只调用一次 `window.open`，source click 同时请求 post-action state。修正后的隔离运行中 action 为 245ms、`observationOutcome.status="completed"`，handler 记录一次 click 且 `navigator.userActivation.isActive=true`，child `/profile` 只请求一次，随后作为可用 tab 发布并能捕获 heading AX。与同一 owner 相邻的 OOPIF registry/resources/CDP、resource locator/cancel、async SPA navigation、pointer layout-shift 五个 live case 在 debug build 中一并通过。
+
+项目正式 `build` 随后将 native runtime、源码协议、SDK dist 与 repo Skill 统一为 `ab-runtime@0.3.0-alpha.2+846dd65b73425c01`，`release:check` 通过。这个最终产物的默认 live suite 单次执行 20/20：新增 popup 场景为 5539ms，scheduler concurrency 的实际双任务区间为 822ms，node package、multi-process persistence、OOPIF、resources、cancellation、multi-tab HAR 与 Skill client 全部在同一 run 中通过；没有把 debug 聚焦结果、前一个构建或分次补跑冒充最终正式全量结果。
 
 正式构建 `ab-runtime@0.3.0-alpha.2+7eef564e92073a50` 后，`scenario-pointer-hit-target-layout-shift`、`scenario-pointer-click-sequence` 与 `scenario-async-spa-navigation` 分别通过；layout-shift 仍只产生一次 trusted activation，多击仍产生完整七个 mouse events，SPA 的 URL、document generation 与 post-action observation 仍来自同一事务。默认 live suite 的一次完整执行连续通过前 16 项，在 `scheduler-concurrency` 以 1514ms 触发既有独立 tab lane 时序阈值；没有修改阈值。系统空闲后同一并发 case 为 810ms 并通过，随后未执行到的 `multitab-har` 与 `skill-client` 也分别通过。因此 19 个默认 case 都有当前 build 的通过证据，但没有把这组分次证据描述成一次首轮 19/19。
 

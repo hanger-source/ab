@@ -23,6 +23,48 @@ impl DomainLeases {
             .await
     }
 
+    /// Enable the baseline page domains for a newly attached session as one
+    /// initialization batch. The session is not published to resource owners
+    /// until this method completes, so these are the first leases for each key.
+    ///
+    /// Keeping the three CDP commands in flight together is important for an
+    /// auto-attached page that is still waiting for the debugger: Runtime or
+    /// Network initialization must not prevent SessionManager from sending the
+    /// matching resume command. See
+    /// `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+    pub async fn acquire_initial_baseline(&self, session_id: &str, owner: &str) -> AbResult<()> {
+        const DOMAINS: [&str; 3] = ["Page", "Runtime", "Network"];
+        {
+            let mut owners = self.owners.lock().await;
+            for domain in DOMAINS {
+                let key = (session_id.to_owned(), domain.to_owned());
+                if owners.contains_key(&key) {
+                    return Err(domain_error(
+                        "initialize",
+                        session_id,
+                        domain,
+                        "initial baseline lease already exists".to_owned(),
+                    ));
+                }
+                owners.insert(key, HashMap::from([(owner.to_owned(), json!({}))]));
+            }
+        }
+
+        let empty_params = json!({});
+        let (page, runtime, network) = tokio::join!(
+            self.apply_configuration(session_id, "Page", &empty_params),
+            self.apply_configuration(session_id, "Runtime", &empty_params),
+            self.apply_configuration(session_id, "Network", &empty_params),
+        );
+        for (domain, result) in DOMAINS.into_iter().zip([page, runtime, network]) {
+            if let Err(message) = result {
+                self.forget_session(session_id).await;
+                return Err(domain_error("enable", session_id, domain, message));
+            }
+        }
+        Ok(())
+    }
+
     pub async fn acquire_with_params(
         &self,
         session_id: &str,

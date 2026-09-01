@@ -62,6 +62,11 @@ const cases: LiveCase[] = [
     default: true,
   },
   {
+    name: "scenario-popup-target-initialization",
+    file: "scenarios/popup-target-initialization/live.ts",
+    default: true,
+  },
+  {
     name: "scenario-icon-font-accessible-name",
     file: "scenarios/icon-font-accessible-name/live.ts",
     default: true,
