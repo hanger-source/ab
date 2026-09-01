@@ -5,42 +5,37 @@ import { connect } from "../../../../sdk/ts/src/index.ts";
 
 const runtimeDirectory = requiredEnv("AB_RUNTIME_DIR");
 let profileRequests = 0;
-const server = http.createServer((request, response) => {
+const profileServer = http.createServer((request, response) => {
+  if (request.url === "/profile") profileRequests += 1;
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-  if (request.url === "/profile") {
-    profileRequests += 1;
-    response.end("<!doctype html><html><head><title>Author profile</title></head><body><h1>Author profile</h1></body></html>");
-    return;
-  }
+  response.end("<!doctype html><html><head><title>Author profile</title></head><body><h1>Author profile</h1></body></html>");
+});
+await listen(profileServer);
+const profileOrigin = originOf(profileServer);
+
+const detailServer = http.createServer((_request, response) => {
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   response.end(`<!doctype html>
     <html>
       <head><title>Detail</title></head>
       <body>
-        <a id="author" href="/profile" target="_blank">Author</a>
+        <a id="author" href="${profileOrigin}/profile" target="_blank">Author</a>
         <output id="clicks">0</output>
         <output id="user-active">false</output>
         <script>
-          document.querySelector('#author').addEventListener('click', event => {
-            event.preventDefault();
+          document.querySelector('#author').addEventListener('click', () => {
             document.querySelector('#clicks').value = '1';
             document.querySelector('#user-active').value = String(navigator.userActivation.isActive);
-            window.open('/profile', '_blank');
           });
         </script>
       </body>
     </html>`);
 });
-
-await new Promise<void>((resolve, reject) => {
-  server.once("error", reject);
-  server.listen(0, "127.0.0.1", resolve);
-});
+await listen(detailServer);
 
 let chromePid: number | null = null;
 try {
-  const address = server.address();
-  assert(address && typeof address === "object");
-  const origin = `http://127.0.0.1:${address.port}`;
+  const origin = originOf(detailServer);
   const browser = await connect();
   chromePid = browser.identity.chrome.pid;
   const detail = await browser.tabs.open(origin);
@@ -70,7 +65,7 @@ try {
     profileRequests,
     status,
   }, null, 2));
-  const profile = await waitForProfileTab(browser, `${origin}/profile`, 5_000);
+  const profile = await waitForProfileTab(browser, `${profileOrigin}/profile`, 5_000);
   const profileState = await profile.ax.snapshot({
     mode: "full",
     surface: "active",
@@ -92,9 +87,26 @@ try {
   await action.observation?.dispose();
   await browser.disconnect();
 } finally {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await Promise.all([close(detailServer), close(profileServer)]);
   await stopDaemon(join(runtimeDirectory, "browser.sock"));
   if (chromePid !== null) stopProcess(chromePid);
+}
+
+async function listen(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+}
+
+function originOf(server: http.Server): string {
+  const address = server.address();
+  assert(address && typeof address === "object");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function close(server: http.Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 async function waitForProfileTab(

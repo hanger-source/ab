@@ -21,12 +21,15 @@ boundary in the suite.
 
 ## Pressure dimensions
 
-- A trusted click reaches an ordinary author link and its handler opens a real
-  top-level page with `window.open`, matching the child-target boundary observed
-  on the authenticated application.
+- A trusted click reaches an ordinary cross-origin author anchor with
+  `target="_blank"`; the browser's native link activation creates the child,
+  matching both the authenticated Xiaohongshu failure and the public GitHub
+  reproduction without a JavaScript `window.open` substitute.
 - Browser-level auto-attach pauses the new target before its first navigation.
-- Page, Runtime, and Network domains must be initialized without preventing the
-  matching `Runtime.runIfWaitingForDebugger` command.
+- Pointer gate, active session features, iframe auto-attach, init scripts, and
+  Page/Runtime/Network domains must all be submitted before waiting on any
+  response; `Runtime.runIfWaitingForDebugger` follows those commands in the
+  same ordered initialization batch.
 - The source action requests a post-dispatch AX state while the child target is
   initializing; the child lifecycle must not consume that observation budget.
 

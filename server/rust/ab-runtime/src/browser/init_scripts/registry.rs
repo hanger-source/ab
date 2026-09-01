@@ -3,7 +3,7 @@ use super::model::{
     init_script_error, init_script_not_found, invalid_binding_payload, InitScriptDefinition,
     InitScriptEvent, InitScriptInstance, InitScriptInstanceIdentity, InitScriptSubscription,
 };
-use crate::agent_browser_engine::cdp::client::CdpClient;
+use crate::agent_browser_engine::cdp::client::{CdpClient, CdpCommandReceipt};
 use crate::error::{AbError, AbResult};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -30,6 +30,14 @@ pub struct InitScriptRegistry {
     client: Arc<CdpClient>,
     registrations: Mutex<HashMap<String, Registration>>,
     events: broadcast::Sender<InitScriptEvent>,
+}
+
+pub struct SessionInstallation {
+    owner_id: String,
+    session_id: String,
+    binding_name: String,
+    binding: CdpCommandReceipt,
+    script: CdpCommandReceipt,
 }
 
 impl InitScriptRegistry {
@@ -95,13 +103,46 @@ impl InitScriptRegistry {
         session_id: &str,
         evaluate_current: bool,
     ) -> AbResult<()> {
+        if evaluate_current {
+            let source = {
+                let registrations = self.registrations.lock().await;
+                let Some(registration) = registrations.get(owner_id) else {
+                    return Ok(());
+                };
+                registration.source.clone()
+            };
+            self.validate_source(session_id, &source).await?;
+        }
+        let Some(installation) = self
+            .begin_session_installation(owner_id, session_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        self.finish_session_installation(installation).await?;
+        if evaluate_current {
+            self.evaluate_current_for_session(owner_id, session_id)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Submit both commands needed by an init script without waiting for
+    /// either response. SessionManager uses this while an auto-attached target
+    /// is paused, sends the target resume only after all installations have
+    /// entered the CDP stream, then calls `finish_session_installation`.
+    pub async fn begin_session_installation(
+        &self,
+        owner_id: &str,
+        session_id: &str,
+    ) -> AbResult<Option<SessionInstallation>> {
         let (binding_name, world_name, source) = {
             let registrations = self.registrations.lock().await;
             let Some(registration) = registrations.get(owner_id) else {
-                return Ok(());
+                return Ok(None);
             };
             if registration.installed.contains_key(session_id) {
-                return Ok(());
+                return Ok(None);
             }
             (
                 registration.binding_name.clone(),
@@ -110,16 +151,13 @@ impl InitScriptRegistry {
             )
         };
 
-        if evaluate_current {
-            self.validate_source(session_id, &source).await?;
-        }
-
         let mut binding_params = json!({ "name": binding_name });
         if let Some(world_name) = world_name.as_deref() {
             binding_params["executionContextName"] = json!(world_name);
         }
-        self.client
-            .send_command("Runtime.addBinding", Some(binding_params), Some(session_id))
+        let binding = self
+            .client
+            .send_command_receipt("Runtime.addBinding", Some(binding_params), Some(session_id))
             .await
             .map_err(|message| init_script_error("binding.add", message))?;
 
@@ -130,15 +168,53 @@ impl InitScriptRegistry {
         if let Some(world_name) = world_name.as_deref() {
             script_params["worldName"] = json!(world_name);
         }
-        let result = match self
+        let script = match self
             .client
-            .send_command(
+            .send_command_receipt(
                 "Page.addScriptToEvaluateOnNewDocument",
                 Some(script_params),
                 Some(session_id),
             )
             .await
         {
+            Ok(script) => script,
+            Err(message) => {
+                drop(binding);
+                return Err(init_script_error("script.add", message));
+            }
+        };
+
+        Ok(Some(SessionInstallation {
+            owner_id: owner_id.to_owned(),
+            session_id: session_id.to_owned(),
+            binding_name,
+            binding,
+            script,
+        }))
+    }
+
+    pub async fn finish_session_installation(
+        &self,
+        installation: SessionInstallation,
+    ) -> AbResult<()> {
+        let SessionInstallation {
+            owner_id,
+            session_id,
+            binding_name,
+            binding,
+            script,
+        } = installation;
+        let (binding_result, script_result) = tokio::join!(binding.wait(), script.wait());
+        if let Err(message) = binding_result {
+            if let Ok(result) = script_result {
+                if let Some(identifier) = result.get("identifier").and_then(Value::as_str) {
+                    self.remove_installation(&session_id, &binding_name, identifier)
+                        .await;
+                }
+            }
+            return Err(init_script_error("binding.add", message));
+        }
+        let result = match script_result {
             Ok(result) => result,
             Err(message) => {
                 let _ = self
@@ -146,38 +222,38 @@ impl InitScriptRegistry {
                     .send_command(
                         "Runtime.removeBinding",
                         Some(json!({ "name": binding_name })),
-                        Some(session_id),
+                        Some(&session_id),
                     )
                     .await;
                 return Err(init_script_error("script.add", message));
             }
         };
-        let identifier = result
-            .get("identifier")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AbError::new(
-                    "protocol_error",
-                    "init_script.script.add",
-                    "Page.addScriptToEvaluateOnNewDocument omitted identifier",
+        let Some(identifier) = result.get("identifier").and_then(Value::as_str) else {
+            let _ = self
+                .client
+                .send_command(
+                    "Runtime.removeBinding",
+                    Some(json!({ "name": binding_name })),
+                    Some(&session_id),
                 )
-            })?
-            .to_owned();
+                .await;
+            return Err(AbError::new(
+                "protocol_error",
+                "init_script.script.add",
+                "Page.addScriptToEvaluateOnNewDocument omitted identifier",
+            ));
+        };
+        let identifier = identifier.to_owned();
 
         let mut registrations = self.registrations.lock().await;
-        if let Some(registration) = registrations.get_mut(owner_id) {
+        if let Some(registration) = registrations.get_mut(&owner_id) {
             registration
                 .installed
-                .insert(session_id.to_owned(), InstalledScript { identifier });
-            drop(registrations);
-            if evaluate_current {
-                self.evaluate_current_for_session(owner_id, session_id)
-                    .await?;
-            }
+                .insert(session_id, InstalledScript { identifier });
             return Ok(());
         }
         drop(registrations);
-        self.remove_installation(session_id, &binding_name, &identifier)
+        self.remove_installation(&session_id, &binding_name, &identifier)
             .await;
         Ok(())
     }

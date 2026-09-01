@@ -3,7 +3,7 @@ use super::init_scripts::{
     InitScriptDefinition, InitScriptInstance, InitScriptInstanceIdentity, InitScriptRegistry,
     InitScriptSubscription,
 };
-use crate::agent_browser_engine::cdp::client::CdpClient;
+use crate::agent_browser_engine::cdp::client::{CdpClient, CdpCommandReceipt};
 use crate::agent_browser_engine::cdp::types::CdpEvent;
 use crate::agent_browser_engine::pointer_action;
 use crate::error::{AbError, AbResult};
@@ -986,9 +986,10 @@ impl SessionManager {
         // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
         // Executable OOPIF coverage:
         // `test/ab/scenarios/oopif-session-registry/README.md`.
-        pointer_action::register_for_session(&self.client, &record.session_id)
-            .await
-            .map_err(|message| session_error("pointer_action.register", message))?;
+        let pointer_registration =
+            pointer_action::begin_register_for_session(&self.client, &record.session_id)
+                .await
+                .map_err(|message| session_error("pointer_action.register", message))?;
         let active_features = self
             .feature_owners
             .lock()
@@ -997,12 +998,17 @@ impl SessionManager {
             .filter(|(target_id, _)| target_id == &record.root_target_id)
             .map(|(_, feature)| feature.clone())
             .collect::<Vec<_>>();
+        let mut feature_registrations = Vec::with_capacity(active_features.len());
         for feature in active_features {
-            self.set_feature_for_session(&record.session_id, &feature, true)
-                .await?;
+            feature_registrations.push((
+                feature.clone(),
+                self.begin_feature_for_session(&record.session_id, &feature, true)
+                    .await?,
+            ));
         }
-        self.client
-            .send_command(
+        let iframe_auto_attach = self
+            .client
+            .send_command_receipt(
                 "Target.setAutoAttach",
                 Some(json!({
                     "autoAttach": true,
@@ -1021,16 +1027,21 @@ impl SessionManager {
             .init_scripts
             .owners_for_target(&record.root_target_id)
             .await;
+        let mut script_installations = Vec::with_capacity(script_owners.len());
         for owner in script_owners {
-            self.init_scripts
-                .install_for_session(&owner, &record.session_id, false)
-                .await?;
+            if let Some(installation) = self
+                .init_scripts
+                .begin_session_installation(&owner, &record.session_id)
+                .await?
+            {
+                script_installations.push(installation);
+            }
         }
 
         // A top-level `target=_blank` page and an OOPIF both arrive paused.
-        // Page/Runtime/Network initialization and resume are one browser
-        // handshake: waiting for any individual domain before sending resume
-        // can deadlock the opener's trusted click. Queue every domain command,
+        // Session initialization and resume are one browser handshake: waiting
+        // for any setup response before sending resume can deadlock the
+        // opener's trusted click. Queue every setup command,
         // then resume without waiting for Chrome to acknowledge that best-effort
         // command. Playwright uses the same concurrent initialization shape and
         // agent-browser likewise sends runIfWaitingForDebugger without awaiting
@@ -1038,14 +1049,54 @@ impl SessionManager {
         // reproduction and the deterministic popup regression.
         let baseline = self
             .domains
-            .acquire_initial_baseline(&record.session_id, &baseline_owner);
-        let resume = self.client.send_command_no_wait(
-            "Runtime.runIfWaitingForDebugger",
-            None,
-            Some(&record.session_id),
+            .begin_initial_baseline(&record.session_id, &baseline_owner)
+            .await?;
+        self.client
+            .send_command_no_wait(
+                "Runtime.runIfWaitingForDebugger",
+                None,
+                Some(&record.session_id),
+            )
+            .await
+            .map_err(|message| session_error("target.resume", message))?;
+
+        let pointer = async {
+            pointer_registration
+                .wait()
+                .await
+                .map_err(|message| session_error("pointer_action.register", message))
+        };
+        let features = join_all(feature_registrations.into_iter().map(|(feature, command)| {
+            let session_id = record.session_id.clone();
+            async move {
+                command
+                    .wait()
+                    .await
+                    .map_err(|message| feature_session_error(&session_id, &feature, message))
+            }
+        }));
+        let iframe_auto_attach = async {
+            iframe_auto_attach
+                .wait()
+                .await
+                .map_err(|message| session_error("target.iframe_auto_attach", message))
+        };
+        let scripts = join_all(
+            script_installations
+                .into_iter()
+                .map(|installation| self.init_scripts.finish_session_installation(installation)),
         );
-        let (baseline, resume) = tokio::join!(biased; baseline, resume);
-        resume.map_err(|message| session_error("target.resume", message))?;
+        let baseline = self.domains.finish_initial_baseline(baseline);
+        let (pointer, features, iframe_auto_attach, scripts, baseline) =
+            tokio::join!(pointer, features, iframe_auto_attach, scripts, baseline);
+        pointer?;
+        for feature in features {
+            feature?;
+        }
+        iframe_auto_attach?;
+        for script in scripts {
+            script?;
+        }
         baseline?;
         pointer_action::evaluate_current_for_session(&self.client, &record.session_id)
             .await
@@ -1084,22 +1135,30 @@ impl SessionManager {
         feature: &str,
         enabled: bool,
     ) -> AbResult<()> {
+        self.begin_feature_for_session(session_id, feature, enabled)
+            .await?
+            .wait()
+            .await
+            .map(|_| ())
+            .map_err(|message| feature_session_error(session_id, feature, message))
+    }
+
+    async fn begin_feature_for_session(
+        &self,
+        session_id: &str,
+        feature: &str,
+        enabled: bool,
+    ) -> AbResult<CdpCommandReceipt> {
         match feature {
             "fileChooser" => self
                 .client
-                .send_command(
+                .send_command_receipt(
                     "Page.setInterceptFileChooserDialog",
                     Some(json!({ "enabled": enabled })),
                     Some(session_id),
                 )
                 .await
-                .map(|_| ())
-                .map_err(|message| {
-                    session_error(
-                        "feature.file_chooser",
-                        format!("session {session_id}: {message}"),
-                    )
-                }),
+                .map_err(|message| feature_session_error(session_id, feature, message)),
             _ => Err(unsupported_feature(feature)),
         }
     }
@@ -1619,6 +1678,16 @@ fn unsupported_feature(feature: &str) -> AbError {
         "session.feature",
         format!("browser feature {feature} is not supported"),
     )
+}
+
+fn feature_session_error(session_id: &str, feature: &str, message: String) -> AbError {
+    match feature {
+        "fileChooser" => session_error(
+            "feature.file_chooser",
+            format!("session {session_id}: {message}"),
+        ),
+        _ => unsupported_feature(feature),
+    }
 }
 
 fn dialog_stale(dialog_id: &str, message: &str) -> AbError {

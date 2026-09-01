@@ -16,7 +16,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::time::sleep;
 
-use super::cdp::client::CdpClient;
+use super::cdp::client::{CdpClient, CdpCommandReceipt};
 use super::element::{resolve_element_object_id, RefMap};
 
 const RETRY_DELAYS_MS: [u64; 5] = [0, 20, 100, 100, 500];
@@ -32,15 +32,17 @@ pub struct PreparedPointerAction {
     pub(crate) object_id: String,
 }
 
-pub async fn register_for_session(client: &CdpClient, session_id: &str) -> Result<(), String> {
+pub async fn begin_register_for_session(
+    client: &CdpClient,
+    session_id: &str,
+) -> Result<CdpCommandReceipt, String> {
     client
-        .send_command(
+        .send_command_receipt(
             "Page.addScriptToEvaluateOnNewDocument",
             Some(json!({ "source": POINTER_ACTION_GATE_SCRIPT })),
             Some(session_id),
         )
-        .await?;
-    Ok(())
+        .await
 }
 
 pub async fn evaluate_current_for_session(

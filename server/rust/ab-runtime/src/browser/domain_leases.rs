@@ -1,5 +1,6 @@
-use crate::agent_browser_engine::cdp::client::CdpClient;
+use crate::agent_browser_engine::cdp::client::{CdpClient, CdpCommandReceipt};
 use crate::error::{AbError, AbResult};
+use futures_util::future::join_all;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,6 +9,11 @@ use tokio::sync::Mutex;
 pub struct DomainLeases {
     client: Arc<CdpClient>,
     owners: Mutex<HashMap<(String, String), HashMap<String, Value>>>,
+}
+
+pub struct InitialBaselineReceipt {
+    session_id: String,
+    commands: Vec<(&'static str, CdpCommandReceipt)>,
 }
 
 impl DomainLeases {
@@ -32,7 +38,11 @@ impl DomainLeases {
     /// Network initialization must not prevent SessionManager from sending the
     /// matching resume command. See
     /// `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
-    pub async fn acquire_initial_baseline(&self, session_id: &str, owner: &str) -> AbResult<()> {
+    pub async fn begin_initial_baseline(
+        &self,
+        session_id: &str,
+        owner: &str,
+    ) -> AbResult<InitialBaselineReceipt> {
         const DOMAINS: [&str; 3] = ["Page", "Runtime", "Network"];
         {
             let mut owners = self.owners.lock().await;
@@ -50,16 +60,48 @@ impl DomainLeases {
             }
         }
 
-        let empty_params = json!({});
-        let (page, runtime, network) = tokio::join!(
-            self.apply_configuration(session_id, "Page", &empty_params),
-            self.apply_configuration(session_id, "Runtime", &empty_params),
-            self.apply_configuration(session_id, "Network", &empty_params),
-        );
-        for (domain, result) in DOMAINS.into_iter().zip([page, runtime, network]) {
+        let mut commands = Vec::with_capacity(DOMAINS.len());
+        for domain in DOMAINS {
+            match self
+                .client
+                .send_command_receipt(
+                    &format!("{domain}.enable"),
+                    Some(json!({})),
+                    Some(session_id),
+                )
+                .await
+            {
+                Ok(receipt) => commands.push((domain, receipt)),
+                Err(message) => {
+                    self.forget_session(session_id).await;
+                    return Err(domain_error("enable", session_id, domain, message));
+                }
+            }
+        }
+        Ok(InitialBaselineReceipt {
+            session_id: session_id.to_owned(),
+            commands,
+        })
+    }
+
+    pub async fn finish_initial_baseline(&self, receipt: InitialBaselineReceipt) -> AbResult<()> {
+        let session_id = receipt.session_id;
+        let domains = receipt
+            .commands
+            .iter()
+            .map(|(domain, _)| *domain)
+            .collect::<Vec<_>>();
+        let results = join_all(
+            receipt
+                .commands
+                .into_iter()
+                .map(|(_, command)| command.wait()),
+        )
+        .await;
+        for (domain, result) in domains.into_iter().zip(results) {
             if let Err(message) = result {
-                self.forget_session(session_id).await;
-                return Err(domain_error("enable", session_id, domain, message));
+                self.forget_session(&session_id).await;
+                return Err(domain_error("enable", &session_id, domain, message));
             }
         }
         Ok(())

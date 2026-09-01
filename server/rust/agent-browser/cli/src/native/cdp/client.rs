@@ -56,6 +56,53 @@ struct PendingGuard {
     done: bool,
 }
 
+/// A CDP command that has already been written to the browser and is waiting
+/// for its response.
+///
+/// Keeping submission separate from response waiting lets target/session
+/// initialization preserve protocol order without deadlocking a target that is
+/// paused on `waitForDebuggerOnStart`: all setup commands can be written, the
+/// resume command can follow, and only then do callers wait for acknowledgments.
+pub struct CdpCommandReceipt {
+    method: String,
+    receiver: oneshot::Receiver<CdpMessage>,
+    guard: PendingGuard,
+}
+
+impl CdpCommandReceipt {
+    pub async fn wait(self) -> Result<Value, String> {
+        self.wait_with_timeout(std::time::Duration::from_secs(30))
+            .await
+    }
+
+    pub async fn wait_with_timeout(
+        mut self,
+        command_timeout: std::time::Duration,
+    ) -> Result<Value, String> {
+        let response = match tokio::time::timeout(command_timeout, &mut self.receiver).await {
+            Ok(Ok(response)) => {
+                self.guard.done = true;
+                response
+            }
+            Ok(Err(_)) => {
+                self.guard.done = true;
+                return Err("CDP response channel closed".to_string());
+            }
+            Err(_) => {
+                self.guard.done = true;
+                self.guard.pending.lock().await.remove(&self.guard.id);
+                return Err(format!("CDP command timed out: {}", self.method));
+            }
+        };
+
+        if let Some(error) = response.error {
+            return Err(format!("CDP error ({}): {}", self.method, error));
+        }
+
+        Ok(response.result.unwrap_or(Value::Null))
+    }
+}
+
 impl Drop for PendingGuard {
     fn drop(&mut self) {
         if self.done {
@@ -257,6 +304,21 @@ impl CdpClient {
         session_id: Option<&str>,
         command_timeout: std::time::Duration,
     ) -> Result<Value, String> {
+        self.send_command_receipt(method, params, session_id)
+            .await?
+            .wait_with_timeout(command_timeout)
+            .await
+    }
+
+    /// Write a command immediately and return a receipt that can be awaited
+    /// later. This is the transport primitive for ordered CDP initialization
+    /// batches; ordinary one-command callers should keep using `send_command`.
+    pub async fn send_command_receipt(
+        &self,
+        method: &str,
+        params: Option<Value>,
+        session_id: Option<&str>,
+    ) -> Result<CdpCommandReceipt, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let cmd = CdpCommand {
@@ -277,7 +339,7 @@ impl CdpClient {
         }
 
         // Cleans up the pending entry if this future is cancelled mid-await (#1528).
-        let mut guard = PendingGuard {
+        let guard = PendingGuard {
             pending: self.pending.clone(),
             id,
             done: false,
@@ -291,27 +353,11 @@ impl CdpClient {
                 .map_err(|e| format!("Failed to send CDP command: {}", e))?;
         }
 
-        let response = match tokio::time::timeout(command_timeout, rx).await {
-            Ok(Ok(resp)) => {
-                guard.done = true;
-                resp
-            }
-            Ok(Err(_)) => {
-                guard.done = true;
-                return Err("CDP response channel closed".to_string());
-            }
-            Err(_) => {
-                guard.done = true;
-                self.pending.lock().await.remove(&id);
-                return Err(format!("CDP command timed out: {}", method));
-            }
-        };
-
-        if let Some(error) = response.error {
-            return Err(format!("CDP error ({}): {}", method, error));
-        }
-
-        Ok(response.result.unwrap_or(Value::Null))
+        Ok(CdpCommandReceipt {
+            method: method.to_owned(),
+            receiver: rx,
+            guard,
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<CdpEvent> {
