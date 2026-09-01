@@ -38,7 +38,7 @@
 |---|---|---:|---|---|---|
 | 544 | source-aware | 1.0 | 1340 entries；一次 PageBuilder iframe body 抓取失败，因此 `complete: false` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/544/` | 复合编辑器的 child frame 输入与保存成立 |
 | 549 | source-aware | 1.0 | 1837 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware-r2/549/` | 新属性与唯一 `XXXL + Green` 变体均由官方网络 evaluator 接受 |
-| 769 | source-aware | 待执行 | — | — | — |
+| 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
 | 771 | source-aware | 待执行 | — | — | — |
 | 610 | source-aware | 待执行 | — | — | — |
 | 733 | source-aware | 待执行 | — | — | — |
@@ -86,12 +86,18 @@ Rust daemon、Chrome、tab 与页面 mutation 均在重连后保留，因此持�
 
 Magento 的 `Edit Configurations` 对普通 pointer click 返回成功但没有打开 dialog。确认 dialog 不存在后，通过已有 `domInvoke("click")` 打开了配置向导。这里没有新增 fallback：pointer action 与 DOM activation 仍是两个显式动作，调用方根据页面事实决定是否使用后者。
 
+769 的商品保存按钮还受到 `.admin__form-loading-mask` 覆盖，pointer action 没有被用来制造“成功”假象；显式 DOM activation 后，每个 SKU 都再次以成功提示和 Quantity 输入值核验。556 的成功提示比动作返回晚约 2 秒，第一次核验为 0，等待页面完成后变成 1，因此没有盲目重放 mutation。
+
+### `write: "none"` 没有抑制动作 observation
+
+769 中对保存按钮执行 `domInvoke("click", { write: "none" })`，调用结果仍反复输出重商品页的整份 AX observation，并触发宿主输出截断。动作已正确执行，但 `write` 选项没有兑现调用方对模型可见输出的控制，增加了 REPL 上下文与超时压力。这是通用 Presenter/动作返回契约问题，不应通过任务专用 helper 绕过。
+
 ### 站点行为，不进入 AB
 
 Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Name filter 使用 `Minerva` 后返回父商品和 15 个变体。特殊字符、搜索索引和筛选语义属于站点行为，不构成 AB selector 或搜索 helper 的理由。
 
 ## 尚未形成的结论
 
-- source-aware 尚未完成 6/6；目前只能确认 544、549 两题通过。
+- source-aware 尚未完成 6/6；目前确认 544、549、769 三题通过。
 - fresh Skill-only 尚未重跑；不能用旧 4/6 代表候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
