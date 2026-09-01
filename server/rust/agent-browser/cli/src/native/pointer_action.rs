@@ -21,6 +21,8 @@ use super::element::{resolve_element_object_id, RefMap};
 
 const RETRY_DELAYS_MS: [u64; 5] = [0, 20, 100, 100, 500];
 const SCROLL_ALIGNMENTS: [&str; 4] = ["protocol", "end", "center", "start"];
+const STABILITY_SAMPLE_INTERVAL_MS: u64 = 16;
+const STABILITY_TOLERANCE_CSS_PX: f64 = 0.25;
 
 #[derive(Debug, Clone)]
 pub struct PreparedPointerAction {
@@ -81,8 +83,8 @@ pub async fn prepare(
     )
     .await?;
     let alignment = SCROLL_ALIGNMENTS[attempt % SCROLL_ALIGNMENTS.len()];
-    wait_for_actionability(client, &session_id, &object_id, alignment).await?;
-    let (x, y) = clickable_point(client, &session_id, &object_id).await?;
+    prepare_actionability(client, &session_id, &object_id, alignment).await?;
+    let (x, y) = stable_clickable_point(client, &session_id, &object_id).await?;
     arm_hit_target_gate(client, &session_id, &object_id, x, y).await?;
 
     Ok(PreparedPointerAction {
@@ -140,7 +142,7 @@ fn is_navigation_context_loss(error: &str) -> bool {
     .any(|needle| error.contains(needle))
 }
 
-async fn wait_for_actionability(
+async fn prepare_actionability(
     client: &CdpClient,
     session_id: &str,
     object_id: &str,
@@ -154,7 +156,7 @@ async fn wait_for_actionability(
                 "functionDeclaration": ACTIONABILITY_FUNCTION,
                 "arguments": [{ "value": alignment }],
                 "returnByValue": true,
-                "awaitPromise": true
+                "awaitPromise": false
             })),
             Some(session_id),
         )
@@ -164,16 +166,41 @@ async fn wait_for_actionability(
         Some("done") => Ok(()),
         Some("detached") => Err("element is detached from the document".to_string()),
         Some("disabled") => Err("element is disabled".to_string()),
-        Some("moving") => Err("element is not stable".to_string()),
         _ => Err("element is not visible".to_string()),
     }
 }
 
-async fn clickable_point(
+#[derive(Debug, Clone, Copy)]
+struct ClickableGeometry {
+    points: [(f64, f64); 4],
+    center: (f64, f64),
+}
+
+async fn stable_clickable_point(
     client: &CdpClient,
     session_id: &str,
     object_id: &str,
 ) -> Result<(f64, f64), String> {
+    let first = clickable_geometry(client, session_id, object_id).await?;
+    sleep(Duration::from_millis(STABILITY_SAMPLE_INTERVAL_MS)).await;
+    let second = clickable_geometry(client, session_id, object_id).await?;
+    let moved = first.points.iter().zip(second.points.iter()).any(
+        |((first_x, first_y), (second_x, second_y))| {
+            (first_x - second_x).abs() > STABILITY_TOLERANCE_CSS_PX
+                || (first_y - second_y).abs() > STABILITY_TOLERANCE_CSS_PX
+        },
+    );
+    if moved {
+        return Err("element is not stable".to_string());
+    }
+    Ok(second.center)
+}
+
+async fn clickable_geometry(
+    client: &CdpClient,
+    session_id: &str,
+    object_id: &str,
+) -> Result<ClickableGeometry, String> {
     let quads = client
         .send_command(
             "DOM.getContentQuads",
@@ -224,7 +251,10 @@ async fn clickable_point(
         }
         let x = points.iter().map(|point| point.0).sum::<f64>() / 4.0;
         let y = points.iter().map(|point| point.1).sum::<f64>() / 4.0;
-        return Ok((x.round(), y.round()));
+        return Ok(ClickableGeometry {
+            points,
+            center: (x.round(), y.round()),
+        });
     }
     Err("element is outside of the viewport or has no clickable area".to_string())
 }
@@ -278,7 +308,7 @@ async fn arm_hit_target_gate(
     }
 }
 
-const ACTIONABILITY_FUNCTION: &str = r#"async function(alignment) {
+const ACTIONABILITY_FUNCTION: &str = r#"function(alignment) {
     if (!(this instanceof Element) || !this.isConnected) return { status: 'detached' };
     const style = getComputedStyle(this);
     const visible = style.visibility !== 'hidden' && style.display !== 'none' &&
@@ -288,15 +318,6 @@ const ACTIONABILITY_FUNCTION: &str = r#"async function(alignment) {
         if (node.disabled === true || node.getAttribute?.('aria-disabled') === 'true')
             return { status: 'disabled' };
     }
-    const rect = () => {
-        const value = this.getBoundingClientRect();
-        return [value.x, value.y, value.width, value.height];
-    };
-    const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve(rect())));
-    const first = await frame();
-    const second = await frame();
-    if (first.some((value, index) => Math.abs(value - second[index]) > 0.25))
-        return { status: 'moving' };
     if (alignment === 'protocol') {
         this.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     } else {

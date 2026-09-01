@@ -63,7 +63,7 @@ drag 的差异更大。AB 目前分别读取 source/target 中心点，发送 do
 
 `server/rust/agent-browser/cli/src/native/pointer_action.rs` 负责：
 
-- 对同一个 backend node 做 visible、enabled 和连续 geometry sample；
+- 对同一个 backend node 做 visible、enabled，并在滚动后由 Rust 通过连续两次 CDP content quad 读取完成 geometry sample；稳定性采样不依赖页面 `requestAnimationFrame`，因此后台或被遮挡 tab 仍由 Browser Runtime 的 deadline 管理；
 - 按多种 alignment 滚动并读取当前 `DOM.getContentQuads`；
 - 只接受 target 自身、shadow-including descendant 或明确 label/control activation；
 - dispatch 前做 preliminary hit-test，在事件捕获阶段以 click 的第一个 trusted button event 复核实际 hit target；`mousemove/pointermove` 只负责 hover preparation，不能完成 click gate；
@@ -170,8 +170,17 @@ dispatch 后，同一 receiver 同时处理 file chooser、navigation page signa
 
 当前实现仍有三项必须由后续证据决定，而不能被描述成已经成熟：
 
-1. actionability 的连续样本使用 `requestAnimationFrame`；后台 tab 的节流行为需要真实多 tab 压力验证。
-2. event-time gate 当前安装在页面可调用的 execution world；是否应迁入 isolated utility world，需要在保持真实 trusted-event interception 的前提下验证，不能只为隐藏全局变量改写。
-3. XHR/Fetch 被用作潜在 SPA navigation 的早期 signal，并有总 deadline 上限；长轮询页面不能因此让普通无导航 click 固定撞满上限。需要以完整 live suite、公开 SPA 和 WebArena timing 继续校准，不能加站点白名单。
+1. event-time gate 当前安装在页面可调用的 execution world；是否应迁入 isolated utility world，需要在保持真实 trusted-event interception 的前提下验证，不能只为隐藏全局变量改写。
+2. XHR/Fetch 被用作潜在 SPA navigation 的早期 signal，并有总 deadline 上限；长轮询页面不能因此让普通无导航 click 固定撞满上限。需要以完整 live suite、公开 SPA 和 WebArena timing 继续校准，不能加站点白名单。
+
+### 后台 tab 的 actionability 边界
+
+真实的持久 profile 多 tab 场景随后证伪了页面 `requestAnimationFrame` 作为稳定性时钟：小红书详情页处于 `document.visibilityState="hidden"` 时，同一个可见作者链接的两帧采样可以一直不返回，动作尚未 dispatch 就耗尽请求 deadline；当 Node REPL 外层同为 30 秒时，宿主先重置 JavaScript kernel。未修改的 agent-browser 0.35.1 在同一链接上还会把 `target=_blank` popup 留成暂停的空 target 并卡住 CLI；Playwright 1.62.1 连接同一 Chrome、点击同一坐标时 120ms 返回，即使页面没有实际产生 popup，也不把缺失的新页当作 input 尚未完成。
+
+因此稳定性仍属于 Pointer Action owner，但时钟不再属于页面。当前实现先同步检查 connected/visible/enabled 并滚动，再由 Rust 间隔 16ms 读取两次 `DOM.getContentQuads`；任一点移动超过 0.25 CSS px 仍分类为 `element is not stable` 并进入既有安全重试。这里没有移除 actionability、增加 DOM click fallback、等待固定业务结果或加入站点规则。popup/auto-attach 与 post-action observation 仍是相邻但独立的 owner，不能借这次修改一起掩盖。
+
+正式构建 `ab-runtime@0.3.0-alpha.2+7eef564e92073a50` 后，`scenario-pointer-hit-target-layout-shift`、`scenario-pointer-click-sequence` 与 `scenario-async-spa-navigation` 分别通过；layout-shift 仍只产生一次 trusted activation，多击仍产生完整七个 mouse events，SPA 的 URL、document generation 与 post-action observation 仍来自同一事务。默认 live suite 的一次完整执行连续通过前 16 项，在 `scheduler-concurrency` 以 1514ms 触发既有独立 tab lane 时序阈值；没有修改阈值。系统空闲后同一并发 case 为 810ms 并通过，随后未执行到的 `multitab-har` 与 `skill-client` 也分别通过。因此 19 个默认 case 都有当前 build 的通过证据，但没有把这组分次证据描述成一次首轮 19/19。
+
+当前固定 profile 上仍有旧 build 的 DSH Node REPL 与另一 Codex Node kernel 作为真实 client owner，且没有 active side effect；版本闸门正确拒绝新 build handover。修复后的同一登录小红书页面尚未由 AB 产品链原样复测，不能因隔离 live suite 通过就宣称该现场已经闭环，也不能通过强杀旧 daemon 或复制登录凭据制造结果。
 
 这些是当前设计的审计边界，不是 fallback 授权。任何后续调整都应继续落在 Pointer Action 或 ActionTransaction owner，并在本文件和对应 scenario 中说明原因。
