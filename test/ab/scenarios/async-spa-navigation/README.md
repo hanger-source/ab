@@ -10,11 +10,13 @@ A real public SPA exposed a three-way disagreement after a semantic link click: 
 - Application code prevents default navigation, starts an asynchronous fetch, and commits with `history.pushState` only after the response.
 - The root document generation remains unchanged, so navigation cannot be inferred from document replacement.
 - Target URL, frame registry, event receiver, and post-action AX capture are separate runtime facts that must be ordered by one action transaction.
+- The same trusted action is exercised both with and without a requested post-action observation, so application settlement cannot silently become part of every input operation.
 
 ## Invariants
 
 - Pointer preparation may retry, but the event stream used to classify effects begins at the one actual input dispatch and contains no preparation-time traffic.
 - The action transaction observes the asynchronous same-document commit without a site-specific sleep or a second input dispatch.
+- An action with `observe: "none"` returns before the server sends delayed route data; the test then waits for the explicit destination fact itself. Input completion does not claim that application work is complete.
 - `ActionResult.navigation.afterUrl`, `browser.tabs.get().url`, and the returned observation describe the same destination state.
 - Same-document navigation changes URL but not document generation.
 - The returned observation contains the destination content rather than the route-loading intermediate state.

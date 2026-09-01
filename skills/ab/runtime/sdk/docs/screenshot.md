@@ -70,7 +70,7 @@ try {
 
 Every coordinate must be chosen from a viewport screenshot and expressed in CSS pixels within `shot.cssViewport.width/height`, paired with its exact `viewportId`. Agent screenshots already use CSS scale by default. A stale-viewport rejection is not retryable with the same coordinates; recapture and inspect again.
 
-CUA mutations return the same `ActionResult` transaction as semantic actions. It records dispatch timing, navigation/document changes, dialog and file-chooser outcomes, and the exact coordinate identity. `observe: "diff"` requests an immediate post-action AX diff; it does not prove the page's business outcome.
+CUA mutations return the same `ActionResult` transaction as semantic actions. It records dispatch timing, navigation/document changes, dialog and file-chooser outcomes, and the exact coordinate identity. `observe: "diff"` requests a bounded post-action effect settle and AX diff; it does not prove the page's business outcome.
 
 A coordinate click uses the same dialog-aware pressed/released sequence as a semantic click. If its handler opens a JavaScript dialog, the result carries that exact dialog identity and any pending pointer release is retained until `accept()` or `dismiss()` completes. Do not reuse the coordinate or send more page input while the dialog is open.
 

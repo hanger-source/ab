@@ -78,13 +78,13 @@ Pointer gate 的 session 初始化分成两个有先后约束的阶段：`Page.a
 
 ### Action signal owner
 
-`server/rust/ab-runtime/src/browser/core.rs` 的 `ActionTransaction` 在 action preparation 前订阅浏览器事件，但在真正 input dispatch 的同步 hook 中 `resubscribe()`，因此 preparation 期间的 background traffic 不会被误归因给本次动作。
+`server/rust/ab-runtime/src/browser/core.rs` 的 `ActionTransaction` 在 action preparation 前订阅两份浏览器事件流，但在真正 input dispatch 的同步 hook 中同时 `resubscribe()`，因此 preparation 期间的 background traffic 不会被误归因给本次动作。
 
-dispatch 后，同一 receiver 同时处理 file chooser、navigation page signals 和相关 network signals。它不再像旧 `collect_file_chooser()` 一样监听 75ms 后丢弃所有非 chooser 事件。最终结果的事实源按 owner 分开：
+dispatch 后两份 receiver 的责任不同：action stream 只处理 acted frame 的 navigation 和 file chooser；只有调用者请求 post-action observation 时，observation stream 才等待同一 frame 的相关 XHR/Fetch 与 page effect，随后进入 DOM/finite-animation settle 和 AX capture。它不再像旧 `collect_file_chooser()` 一样丢掉导航，也不再让 `observe:none` 为了来源页 background Fetch 等待。最终结果的事实源按 owner 分开：
 
 - top-level current URL 来自 `SessionManager` 的 Target record；
 - frame document generation 来自 Frame registry；
-- optional AX diff/state 在 signal settlement 后捕获；
+- optional AX diff/state 在 observation-owned effect settlement 后捕获；
 - URL 与 generation 在 observation 完成后最后读取。
 
 这解决了同一时刻 `browser.tabs.list()` 已看到 destination、`ActionResult.navigation` 却仍报告 source URL 的自相矛盾。
@@ -113,9 +113,9 @@ dispatch 后，同一 receiver 同时处理 file chooser、navigation page signa
 
 ### 永久机械场景
 
-`test/ab/scenarios/async-spa-navigation/` 保留 trusted anchor click、`preventDefault()`、异步 route fetch、`history.pushState()`、destination AX render 的完整形状。它会在以下任一回归时失败：事件订阅晚于 dispatch、receiver 被其他 watcher 消费、URL 继续读 stale frame、observation 提前捕获 loading state，或 pointer input 被重放。
+`test/ab/scenarios/async-spa-navigation/` 保留 trusted anchor click、`preventDefault()`、异步 route fetch、`history.pushState()`、destination AX render 的完整形状。同一链接先以 `observe:none` 执行，动作必须在服务端发送延迟 route response 前返回；测试随后显式等待 destination URL。另一 tab 再以 `observe:diff` 执行，返回的 URL 与 AX 必须都属于 destination。它会在以下任一回归时失败：事件订阅晚于 dispatch、动作继续承担应用请求 settlement、observation receiver 被其他 watcher 消费、URL 继续读 stale frame、observation 提前捕获 loading state，或 pointer input 被重放。
 
-首次当前实现结果：action transaction 868ms，navigation changed，source `/` → destination `/destination`，document generation 不变，post-action observation completed 并包含 destination content。
+责任拆分后的正式产品结果：无 observation 的 action 145ms 返回，route response 发送数仍为 0，返回时如实报告 URL 尚未变化；请求 diff 的 action 459ms 返回，navigation changed，source `/` → destination `/destination`，document generation 不变，post-action observation completed 并包含 destination content。
 
 `test/ab/scenarios/pointer-hit-target-layout-shift/` 保存 Magento 失败的最小浏览器边界：trusted `mousemove` 先命中 anchor，页面 bubble listener 随即把 anchor 移到另一位置，旧坐标在 button dispatch 时只剩 table cell。修改前该场景稳定得到 `dispatchMechanism=cdp.pointer` 但 activation `0`；把 click gate 收敛为 Playwright 的 button-event 证据后，同一场景只发生一次 trusted activation 并通过。
 
@@ -168,10 +168,9 @@ dispatch 后，同一 receiver 同时处理 file chooser、navigation page signa
 
 ## 仍需关注的边界
 
-当前实现仍有三项必须由后续证据决定，而不能被描述成已经成熟：
+当前实现仍有一项必须由后续证据决定，而不能被描述成已经成熟：
 
 1. event-time gate 当前安装在页面可调用的 execution world；是否应迁入 isolated utility world，需要在保持真实 trusted-event interception 的前提下验证，不能只为隐藏全局变量改写。
-2. XHR/Fetch 被用作潜在 SPA navigation 的早期 signal，并有总 deadline 上限；长轮询页面不能因此让普通无导航 click 固定撞满上限。需要以完整 live suite、公开 SPA 和 WebArena timing 继续校准，不能加站点白名单。
 
 ### 后台 tab 的 actionability 边界
 
@@ -189,10 +188,14 @@ popup 的责任落在 SessionManager，而不是 ActionTransaction。第一次�
 
 同一个公开 GitHub 链接在当前源码上完成两种 A/B：`write:"state"` 的 source action 1996ms 返回且 observation completed，child 1654ms 后被发现；`write:"none"` 的 action 221ms 返回，child 391ms 后被发现。两条链都保留 source URL、发布目标 PR tab，不再产生空 target、session attach failure 或 Node REPL kernel reset。Codex Browser 的同构操作同样把 click、popup claim 与 child snapshot 分开；这说明 AB 可以继续讨论默认 observation 的成本，但不能用拆分 observation 代替 Session 初始化修复。
 
+随后在真实 GitHub issue 页的原生 `target="_blank"` 作者链接上，用当前源码交替执行六次有/无 observation 的 A/B，并记录来源 tab 的 CDP request id。六次 child 全部发布到同一作者页；`observe:none` 在无来源请求时 action 151ms，有三条来源 Fetch 时为 218ms/504ms，说明旧 ActionTransaction 仍把与 popup 初始化无关的来源页请求纳入 input completion。对照 Playwright 的 `SignalBarrier` 后，责任没有改成 `write:none` 特判：Rust 保留 action-owned acted-frame navigation/chooser stream，同时增加独立的 optional observation-effect stream。新机械场景证明无 observation action 在 route response 发出前返回，请求 observation 的动作仍得到 destination URL/AX；popup 场景同时保持 action 424ms、child 正常发布。
+
 `test/ab/scenarios/popup-target-initialization/` 现在保存原生跨 origin `<a target="_blank">`，不再以 `preventDefault()+window.open()` 代替浏览器链接激活。当前 debug runtime 中 action 248ms、source observation completed、`navigator.userActivation.isActive=true`、profile 只导航一次，child 发布后能捕获 heading AX。同一构建继续通过 OOPIF registry/resources/CDP、resource locator/cancel 与 async SPA navigation，覆盖 paused OOPIF、init script、file chooser feature、domain lease 和 post-action observation 的邻接边界。
 
 正式构建把 native runtime、SDK、repo Skill 和协议统一为 `ab-runtime@0.3.0-alpha.2+40a2ee6e8fd0e935`；release identity、23 个 Agent documentation topics、协议生成检查、SDK typecheck、两个 npm tarball dry-run、workspace clippy `-D warnings` 与单进程 workspace tests 全部通过。同一正式产物的默认 live suite 单次 20/20：新增跨域 popup 为 3944ms，其中 action 230ms；OOPIF/init script、file chooser/resource、cancellation、scheduler concurrency、multi-tab HAR 与 Skill client 都在同一 run 内通过，没有拿 debug、旧构建或分次补跑拼接结果。
 
-固定 profile 仍由旧 build 的真实 client 使用，修复后的同一登录小红书页面尚未在新产品构建上复测；不能通过强杀旧 daemon 或复制登录凭据制造闭环。当前 20/20 证明产品链和相邻 owner 没有回归，公开 GitHub 证明真实 top-level popup 已修复，但两者都不冒充这份唯一登录现场的最终复测。
+Action/observation owner 拆分后的正式产品构建统一为 `ab-runtime@0.3.0-alpha.2+4a3d34554815f819`。SDK typecheck、23 个 Agent documentation topics、protocol generation、workspace 1156 tests 和 workspace clippy `-D warnings` 通过；同一正式产物的默认 live suite 再次单次 20/20。更新后的 async SPA 场景同时证明无 observation action 不等待 route response、请求 diff 的 action 返回 destination URL/AX；跨域 popup 场景 action 266ms，child 正常发布。OOPIF、large document、overlay、animation、pointer sequence、Locator、resources、cancellation、scheduler concurrency、multi-tab HAR、npm package 和 self-contained Skill client 均在同一 run 内通过。
+
+固定 profile 仍由旧 build 的真实 owner 使用。新构建连接时旧 daemon 明确返回 `ee830113781e06bf still has active owners`，因此修复后的同一登录小红书页面尚未在新产品构建上复测；不能通过强杀旧 daemon 或复制登录凭据制造闭环。当前 20/20 证明产品链和相邻 owner 没有回归，公开 GitHub 证明真实 top-level popup 已修复，但两者都不冒充这份唯一登录现场的最终复测。
 
 这些是当前设计的审计边界，不是 fallback 授权。任何后续调整都应落在实际拥有该事实的 Pointer Action、ActionTransaction 或 SessionManager，并在本文件和对应 scenario 中说明原因。

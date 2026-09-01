@@ -163,25 +163,36 @@ struct ActionTransaction {
     before_url: String,
     before_generation: String,
     root_frame_id: String,
-    events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
+    action_events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
+    observation_events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
     deadline: Instant,
 }
 
 impl ActionTransaction {
     fn mark_dispatch(&self, marker: &ActionDispatchMarker) {
-        let mut events = self.events.lock().expect("action event stream poisoned");
-        if let Some(receiver) = events.as_mut() {
-            *receiver = receiver.resubscribe();
+        for events in [&self.action_events, &self.observation_events] {
+            let mut events = events.lock().expect("action event stream poisoned");
+            if let Some(receiver) = events.as_mut() {
+                *receiver = receiver.resubscribe();
+            }
         }
         marker.mark_started();
     }
 
-    fn take_events(&self) -> broadcast::Receiver<CdpEvent> {
-        self.events
+    fn take_action_events(&self) -> broadcast::Receiver<CdpEvent> {
+        self.action_events
             .lock()
             .expect("action event stream poisoned")
             .take()
             .expect("action event stream already consumed")
+    }
+
+    fn take_observation_events(&self) -> broadcast::Receiver<CdpEvent> {
+        self.observation_events
+            .lock()
+            .expect("observation event stream poisoned")
+            .take()
+            .expect("action did not arm an observation event stream")
     }
 }
 
@@ -460,7 +471,13 @@ impl BrowserCore {
             coordinate,
         );
         let transaction = self
-            .begin_action(&context, operation, identity, deadline)
+            .begin_action(
+                &context,
+                operation,
+                identity,
+                observation_options.is_some(),
+                deadline,
+            )
             .await?;
         transaction.mark_dispatch(dispatch_marker);
         let dispatch = if operation == "click" {
@@ -700,10 +717,12 @@ impl BrowserCore {
         context: &TargetContext,
         action: &str,
         target: ActionTargetIdentity,
+        observe: bool,
         deadline: Instant,
     ) -> AbResult<ActionTransaction> {
         let id = Uuid::new_v4().to_string();
-        let events = context.sessions.subscribe_browser_events();
+        let action_events = context.sessions.subscribe_browser_events();
+        let observation_events = observe.then(|| context.sessions.subscribe_browser_events());
         context
             .sessions
             .acquire_feature(&context.target_id, "fileChooser", &id)
@@ -727,7 +746,8 @@ impl BrowserCore {
             before_url,
             before_generation: frame.document_generation.clone(),
             root_frame_id: context.root_frame.id.clone(),
-            events: Arc::new(std::sync::Mutex::new(Some(events))),
+            action_events: Arc::new(std::sync::Mutex::new(Some(action_events))),
+            observation_events: Arc::new(std::sync::Mutex::new(observation_events)),
             deadline,
         })
     }
@@ -765,64 +785,87 @@ impl BrowserCore {
                 return Err(error);
             }
         };
-        let mut action_events = transaction.take_events();
-        let action_targets_root_frame = transaction.target.frame_id == transaction.root_frame_id;
-        let action_signals = collect_action_signals(
-            self.owner.sessions(),
+        let sessions = self.owner.sessions();
+        let mut action_events = transaction.take_action_events();
+        let mut observation_events = observation_options
+            .is_some()
+            .then(|| transaction.take_observation_events());
+        let dialog = sessions.dialog_for_target(&target_id).await;
+        let dialog_blocking = dialog_opened || dialog.is_some();
+        let action_signals_future = collect_action_signals(
+            Arc::clone(&sessions),
             &target_id,
+            &transaction.target.frame_id,
+            &transaction.root_frame_id,
             &transaction.before_url,
-            action_targets_root_frame,
             &mut action_events,
             deadline,
-        )
-        .await;
-        self.owner
-            .sessions()
+        );
+        let capture_future = async {
+            if observation_options.is_some() && !dialog_blocking {
+                let capture = async {
+                    settle_action_observation_effects(
+                        Arc::clone(&sessions),
+                        &target_id,
+                        &transaction.target.frame_id,
+                        &transaction.root_frame_id,
+                        &transaction.before_url,
+                        observation_events
+                            .as_mut()
+                            .expect("checked observation options before dispatch"),
+                        deadline,
+                    )
+                    .await;
+                    let after_context = self.context(&target_id).await?;
+                    settle_action_observation(
+                        &after_context,
+                        &transaction.target.frame_id,
+                        deadline,
+                    )
+                    .await?;
+                    let mut options = observation_options.expect("checked above").clone();
+                    options.diff_from = baseline.map(|record| record.output.id.clone());
+                    let record = observation_engine::capture(
+                        &after_context,
+                        client_id,
+                        Uuid::new_v4().to_string(),
+                        self.observations.next_revision(&target_id).await,
+                        &options,
+                        baseline,
+                    )
+                    .await?;
+                    self.observations.insert(record).await
+                };
+                let capture_budget = deadline
+                    .saturating_duration_since(Instant::now())
+                    .saturating_sub(ACTION_RESPONSE_RESERVE);
+                let capture = if capture_budget.is_zero() {
+                    Err(AbError::new(
+                        "timeout",
+                        "action.observation.deadline",
+                        "request deadline elapsed after input dispatch and before post-action observation",
+                    ))
+                } else {
+                    match timeout(capture_budget, capture).await {
+                        Ok(result) => result,
+                        Err(_) => Err(AbError::new(
+                            "timeout",
+                            "action.observation.deadline",
+                            "post-action observation did not finish before the request deadline",
+                        )),
+                    }
+                };
+                Some(capture)
+            } else {
+                None
+            }
+        };
+        let (action_signals, capture) = tokio::join!(action_signals_future, capture_future);
+        sessions
             .release_feature(&target_id, "fileChooser", &transaction.id)
             .await?;
 
-        let sessions = self.owner.sessions();
-        let dialog = sessions.dialog_for_target(&target_id).await;
-        let dialog_blocking = dialog_opened || dialog.is_some();
-        let (observation, observation_outcome) = if observation_options.is_some()
-            && !dialog_blocking
-        {
-            let capture = async {
-                let after_context = self.context(&target_id).await?;
-                settle_action_observation(&after_context, &transaction.target.frame_id, deadline)
-                    .await?;
-                let mut options = observation_options.expect("checked above").clone();
-                options.diff_from = baseline.map(|record| record.output.id.clone());
-                let record = observation_engine::capture(
-                    &after_context,
-                    client_id,
-                    Uuid::new_v4().to_string(),
-                    self.observations.next_revision(&target_id).await,
-                    &options,
-                    baseline,
-                )
-                .await?;
-                self.observations.insert(record).await
-            };
-            let capture_budget = deadline
-                .saturating_duration_since(Instant::now())
-                .saturating_sub(ACTION_RESPONSE_RESERVE);
-            let capture = if capture_budget.is_zero() {
-                Err(AbError::new(
-                    "timeout",
-                    "action.observation.deadline",
-                    "request deadline elapsed after input dispatch and before post-action observation",
-                ))
-            } else {
-                match timeout(capture_budget, capture).await {
-                    Ok(result) => result,
-                    Err(_) => Err(AbError::new(
-                        "timeout",
-                        "action.observation.deadline",
-                        "post-action observation did not finish before the request deadline",
-                    )),
-                }
-            };
+        let (observation, observation_outcome) = if let Some(capture) = capture {
             match capture {
                 Ok(observation) => (Some(observation), ActionObservationOutcome::completed()),
                 Err(error) => (None, ActionObservationOutcome::failed(error)),
@@ -1002,7 +1045,13 @@ impl BrowserCore {
         let mut identity = ActionTargetIdentity::new("elementHandle", &target);
         identity.element_id = Some(element_id.to_owned());
         let transaction = self
-            .begin_action(&context, operation, identity, deadline)
+            .begin_action(
+                &context,
+                operation,
+                identity,
+                observation_options.is_some(),
+                deadline,
+            )
             .await?;
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             transaction.mark_dispatch(dispatch_marker);
@@ -1155,7 +1204,13 @@ impl BrowserCore {
             None
         };
         let transaction = self
-            .begin_action(&context, action, identity, deadline)
+            .begin_action(
+                &context,
+                action,
+                identity,
+                observation_options.is_some(),
+                deadline,
+            )
             .await?;
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             transaction.mark_dispatch(dispatch_marker);
@@ -1280,7 +1335,13 @@ impl BrowserCore {
                         .await?;
                     let identity = ActionTargetIdentity::new("locator", &target);
                     let transaction = self
-                        .begin_action(&context, &request.operation, identity, deadline)
+                        .begin_action(
+                            &context,
+                            &request.operation,
+                            identity,
+                            observation_options.is_some(),
+                            deadline,
+                        )
                         .await?;
                     let outcome = if request.operation == "drag" {
                         transaction.mark_dispatch(dispatch_marker);
@@ -2322,8 +2383,9 @@ struct ActionSignals {
 async fn collect_action_signals(
     sessions: Arc<super::session_manager::SessionManager>,
     target_id: &str,
+    action_frame_id: &str,
+    root_frame_id: &str,
     before_url: &str,
-    action_targets_root_frame: bool,
     receiver: &mut broadcast::Receiver<CdpEvent>,
     request_deadline: Instant,
 ) -> ActionSignals {
@@ -2338,10 +2400,11 @@ async fn collect_action_signals(
         };
     }
 
-    // An action owns the event receiver from before input dispatch. Give browser
-    // signals a short discovery window, then—only when the action actually
-    // caused navigation or relevant network work—wait for completion and a
-    // quiet period. This is event-driven action settlement, not a site delay.
+    // The action owns browser-level consequences of its input: a chooser and
+    // navigation of the frame that received the action. Application XHR/Fetch
+    // belongs to an optional post-action observation, not input completion.
+    // Design evidence:
+    // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
     const DISCOVERY_WINDOW: Duration = Duration::from_millis(100);
     const QUIET_WINDOW: Duration = Duration::from_millis(100);
     const MAX_SIGNAL_WAIT: Duration = Duration::from_secs(2);
@@ -2351,29 +2414,24 @@ async fn collect_action_signals(
     let mut discovery_deadline = started + available.min(DISCOVERY_WINDOW);
     let mut activity_seen = false;
     let mut quiet_since: Option<Instant> = None;
-    let mut pending_requests = HashSet::<String>::new();
     let mut file_chooser = FileChooserOutcome::none();
     let mut navigation_committed = false;
 
     loop {
         let now = Instant::now();
-        if action_targets_root_frame
-            && !navigation_committed
-            && sessions
-                .target(target_id)
+        if !navigation_committed
+            && action_frame_url(&sessions, target_id, action_frame_id, root_frame_id)
                 .await
-                .is_ok_and(|target| target.url != before_url)
+                .is_some_and(|url| url != before_url)
         {
             navigation_committed = true;
             activity_seen = true;
-            pending_requests.clear();
             quiet_since = Some(now);
         }
         if !activity_seen && now >= discovery_deadline {
             return ActionSignals { file_chooser };
         }
         if activity_seen
-            && pending_requests.is_empty()
             && quiet_since
                 .is_some_and(|quiet_start| now.duration_since(quiet_start) >= QUIET_WINDOW)
         {
@@ -2382,12 +2440,10 @@ async fn collect_action_signals(
 
         let wake_at = if !activity_seen {
             discovery_deadline.min(deadline)
-        } else if pending_requests.is_empty() {
+        } else {
             quiet_since
                 .map(|quiet_start| (quiet_start + QUIET_WINDOW).min(deadline))
                 .unwrap_or(deadline)
-        } else {
-            deadline
         };
         let remaining = wake_at.saturating_duration_since(now);
         if remaining.is_zero() {
@@ -2399,11 +2455,11 @@ async fn collect_action_signals(
 
         match timeout(remaining, receiver.recv()).await {
             Ok(Ok(event)) => {
-                let Some(session_id) = event.session_id else {
+                let Some(session_id) = event.session_id.as_deref() else {
                     continue;
                 };
                 if !sessions
-                    .session_belongs_to_root(&session_id, target_id)
+                    .session_belongs_to_root(session_id, target_id)
                     .await
                 {
                     continue;
@@ -2414,7 +2470,7 @@ async fn collect_action_signals(
                         file_chooser = FileChooserOutcome {
                             opened: true,
                             complete: true,
-                            session_id: Some(session_id),
+                            session_id: Some(session_id.to_owned()),
                             frame_id: event
                                 .params
                                 .get("frameId")
@@ -2431,34 +2487,26 @@ async fn collect_action_signals(
                                 .map(str::to_owned),
                         };
                     }
-                    "Network.requestWillBeSent"
-                        if !navigation_committed && is_action_network_request(&event.params) =>
+                    method
+                        if is_navigation_start_signal(method)
+                            && event_frame_id(&event) == Some(action_frame_id) =>
                     {
-                        if let Some(request_id) =
-                            event.params.get("requestId").and_then(Value::as_str)
-                        {
-                            pending_requests.insert(request_id.to_owned());
-                        }
                         activity_seen = true;
                         quiet_since = None;
                     }
-                    "Network.loadingFinished" | "Network.loadingFailed"
-                        if !navigation_committed =>
+                    method
+                        if is_navigation_commit_signal(method)
+                            && event_frame_id(&event) == Some(action_frame_id) =>
                     {
-                        let removed = event
-                            .params
-                            .get("requestId")
-                            .and_then(Value::as_str)
-                            .is_some_and(|request_id| pending_requests.remove(request_id));
-                        if removed && pending_requests.is_empty() {
-                            quiet_since = Some(Instant::now());
-                        }
-                    }
-                    method if is_action_page_signal(method) => {
                         activity_seen = true;
-                        if pending_requests.is_empty() {
-                            quiet_since = Some(Instant::now());
-                        }
+                        navigation_committed = true;
+                        quiet_since = Some(Instant::now());
+                    }
+                    "Page.frameStoppedLoading"
+                        if event_frame_id(&event) == Some(action_frame_id) =>
+                    {
+                        activity_seen = true;
+                        quiet_since = Some(Instant::now());
                     }
                     _ => {}
                 }
@@ -2482,6 +2530,156 @@ async fn collect_action_signals(
     }
 }
 
+async fn settle_action_observation_effects(
+    sessions: Arc<super::session_manager::SessionManager>,
+    target_id: &str,
+    action_frame_id: &str,
+    root_frame_id: &str,
+    before_url: &str,
+    receiver: &mut broadcast::Receiver<CdpEvent>,
+    request_deadline: Instant,
+) {
+    let available = request_deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(ACTION_RESPONSE_RESERVE);
+    if available.is_zero() {
+        return;
+    }
+
+    const DISCOVERY_WINDOW: Duration = Duration::from_millis(100);
+    const QUIET_WINDOW: Duration = Duration::from_millis(100);
+    const MAX_EFFECT_WAIT: Duration = Duration::from_secs(2);
+
+    let started = Instant::now();
+    let deadline = started + available.min(MAX_EFFECT_WAIT);
+    let discovery_deadline = started + available.min(DISCOVERY_WINDOW);
+    let mut activity_seen = false;
+    let mut quiet_since: Option<Instant> = None;
+    let mut pending_requests = HashSet::<String>::new();
+    let mut navigation_committed = false;
+
+    loop {
+        let now = Instant::now();
+        if !navigation_committed
+            && action_frame_url(&sessions, target_id, action_frame_id, root_frame_id)
+                .await
+                .is_some_and(|url| url != before_url)
+        {
+            navigation_committed = true;
+            activity_seen = true;
+            pending_requests.clear();
+            quiet_since = Some(now);
+        }
+        if !activity_seen && now >= discovery_deadline {
+            return;
+        }
+        if activity_seen
+            && pending_requests.is_empty()
+            && quiet_since
+                .is_some_and(|quiet_start| now.duration_since(quiet_start) >= QUIET_WINDOW)
+        {
+            return;
+        }
+
+        let wake_at = if !activity_seen {
+            discovery_deadline.min(deadline)
+        } else if pending_requests.is_empty() {
+            quiet_since
+                .map(|quiet_start| (quiet_start + QUIET_WINDOW).min(deadline))
+                .unwrap_or(deadline)
+        } else {
+            deadline
+        };
+        let remaining = wake_at.saturating_duration_since(now);
+        if remaining.is_zero() {
+            return;
+        }
+
+        match timeout(remaining, receiver.recv()).await {
+            Ok(Ok(event)) => {
+                let Some(session_id) = event.session_id.as_deref() else {
+                    continue;
+                };
+                if !sessions
+                    .session_belongs_to_root(session_id, target_id)
+                    .await
+                {
+                    continue;
+                }
+
+                match event.method.as_str() {
+                    "Network.requestWillBeSent"
+                        if event.params.get("frameId").and_then(Value::as_str)
+                            == Some(action_frame_id)
+                            && is_action_network_request(&event.params) =>
+                    {
+                        if let Some(request_id) =
+                            event.params.get("requestId").and_then(Value::as_str)
+                        {
+                            pending_requests.insert(request_id.to_owned());
+                        }
+                        activity_seen = true;
+                        quiet_since = None;
+                    }
+                    "Network.loadingFinished" | "Network.loadingFailed" => {
+                        let removed = event
+                            .params
+                            .get("requestId")
+                            .and_then(Value::as_str)
+                            .is_some_and(|request_id| pending_requests.remove(request_id));
+                        if removed && pending_requests.is_empty() {
+                            quiet_since = Some(Instant::now());
+                        }
+                    }
+                    method
+                        if is_action_page_signal(method)
+                            && event_frame_id(&event) == Some(action_frame_id) =>
+                    {
+                        activity_seen = true;
+                        if pending_requests.is_empty() {
+                            quiet_since = Some(Instant::now());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(_)))
+            | Ok(Err(broadcast::error::RecvError::Closed))
+            | Err(_) => return,
+        }
+    }
+}
+
+async fn action_frame_url(
+    sessions: &super::session_manager::SessionManager,
+    target_id: &str,
+    action_frame_id: &str,
+    root_frame_id: &str,
+) -> Option<String> {
+    if action_frame_id == root_frame_id {
+        sessions
+            .target(target_id)
+            .await
+            .ok()
+            .map(|target| target.url)
+    } else {
+        sessions
+            .frames(target_id)
+            .await
+            .into_iter()
+            .find(|frame| frame.id == action_frame_id)
+            .map(|frame| frame.url)
+    }
+}
+
+fn event_frame_id(event: &CdpEvent) -> Option<&str> {
+    event
+        .params
+        .get("frameId")
+        .or_else(|| event.params.pointer("/frame/id"))
+        .and_then(Value::as_str)
+}
+
 fn is_action_network_request(params: &Value) -> bool {
     matches!(
         params.get("type").and_then(Value::as_str),
@@ -2500,6 +2698,20 @@ fn is_action_page_signal(method: &str) -> bool {
             | "Page.domContentEventFired"
             | "Page.loadEventFired"
             | "Page.lifecycleEvent"
+    )
+}
+
+fn is_navigation_start_signal(method: &str) -> bool {
+    matches!(
+        method,
+        "Page.frameRequestedNavigation" | "Page.frameStartedLoading"
+    )
+}
+
+fn is_navigation_commit_signal(method: &str) -> bool {
+    matches!(
+        method,
+        "Page.frameNavigated" | "Page.navigatedWithinDocument"
     )
 }
 

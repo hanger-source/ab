@@ -30,9 +30,11 @@ const page = `<!doctype html>
   </body>
 </html>`;
 
+let routeResponsesSent = 0;
 const server = http.createServer((request, response) => {
   if (request.url === "/route-data") {
     setTimeout(() => {
+      routeResponsesSent += 1;
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ id: "destination", title: "Destination workspace" }));
     }, 220);
@@ -53,6 +55,21 @@ try {
   assert(address && typeof address === "object");
   const browser = await connect();
   chromePid = browser.identity.chrome.pid;
+
+  const actionOnlyTab = await browser.tabs.open(`http://127.0.0.1:${address.port}`);
+  const responsesBeforeAction = routeResponsesSent;
+  const actionOnly = await actionOnlyTab
+    .getByRole("link", { name: "Open destination workspace", exact: true })
+    .click({ observe: "none" });
+  const responsesSentAtActionReturn = routeResponsesSent - responsesBeforeAction;
+  assert.equal(
+    responsesSentAtActionReturn,
+    0,
+    "an action without a post-action observation must not wait for application route data",
+  );
+  assert.equal(actionOnly.observation, null);
+  await waitForPath(browser, actionOnlyTab.id, "/destination");
+
   const tab = await browser.tabs.open(`http://127.0.0.1:${address.port}`);
   const baseline = await tab.ax.snapshot({ mode: "full", surface: "active" });
 
@@ -73,6 +90,11 @@ try {
 
   console.log(JSON.stringify({
     scenario: "async-spa-navigation",
+    actionOnly: {
+      durationMs: actionOnly.timing.durationMs,
+      navigation: actionOnly.navigation,
+      responsesSentAtReturn: responsesSentAtActionReturn,
+    },
     action: {
       durationMs: action.timing.durationMs,
       navigation: action.navigation,
@@ -109,4 +131,18 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   assert(value, `${name} is required`);
   return value;
+}
+
+async function waitForPath(
+  browser: Awaited<ReturnType<typeof connect>>,
+  targetId: string,
+  pathname: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const current = await browser.tabs.get(targetId);
+    if (new URL(current.url).pathname === pathname) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`tab ${targetId} did not reach ${pathname}`);
 }

@@ -2,6 +2,8 @@
 
 Browser lifecycle readiness and application readiness are different facts. `domcontentloaded` proves that the new document parsed; `load` proves its load event fired. Neither proves that a SPA finished rendering, data loaded, authentication succeeded, or a submitted operation completed.
 
+Action completion and application readiness are also different facts. An action without a requested post-action observation still records navigation, dialog, and file-chooser signals, but it does not wait for source-page XHR/Fetch or render settlement. An action that requests an observation uses a separately armed bounded effect stream before capture. Neither mode replaces an explicit wait for the business fact the next decision needs.
+
 ## Navigate deliberately
 
 ```js

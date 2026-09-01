@@ -177,7 +177,7 @@ type ActionOptions = {
 };
 ```
 
-When `observe:"diff"` is selected, Core callers pass an existing `baseline`; Rust captures only the post-action state and compares it to that explicit identity. `AXRef` supplies its owning observation automatically. When `observation` is omitted, the post-action capture inherits the baseline's exact shape; an explicitly conflicting shape is rejected before dispatch. `observe:"state"` captures only the post-action state. `@hanger-source/ab/agent` state-changing short-ref, Locator, and CUA actions reuse the last successfully presented state and its exact capture shape. A first action without a presented baseline, or an explicit `write:"state"`, uses the bounded Agent full-state shape.
+When `observe:"diff"` is selected, Core callers pass an existing `baseline`; Rust captures only the post-action state and compares it to that explicit identity. `AXRef` supplies its owning observation automatically. When `observation` is omitted, the post-action capture inherits the baseline's exact shape; an explicitly conflicting shape is rejected before dispatch. `observe:"state"` captures only the post-action state. Both observation modes arm application-effect settlement before input dispatch. `observe:"none"` skips that settlement and capture while retaining action-owned navigation, dialog, and file-chooser reporting. `@hanger-source/ab/agent` state-changing short-ref, Locator, and CUA actions reuse the last successfully presented state and its exact capture shape. A first action without a presented baseline, or an explicit `write:"state"`, uses the bounded Agent full-state shape.
 
 All AXRef, Locator, and ElementHandle mutations return the same `ActionResult`:
 
