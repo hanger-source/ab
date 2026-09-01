@@ -9,9 +9,9 @@ This is not the user's everyday Chrome profile. AB does not copy credentials fro
 List tabs first, then open the target site in the same AB profile:
 
 ```js
-let tabs = await agent.tabs.list();
+let tabs = await browser.tabs.list();
 let tab = tabs.find(t => t.url.startsWith("https://app.example.com/"));
-if (!tab) tab = await agent.tabs.open("https://app.example.com/");
+if (!tab) tab = await browser.tabs.open("https://app.example.com/");
 await tab.ax.write("state");
 ```
 

@@ -23,12 +23,19 @@ export type ObservationRef = {
 export type ObservationDiff = {
     fromObservationId: string;
     documentReplaced: boolean;
+    surfaceReplaced: boolean;
     text: string;
     additions: number;
     removals: number;
     addedRefs: string[];
     removedRefs: string[];
     changedRefs: string[];
+};
+export type ObservationSurfaceIdentity = {
+    sessionId: string;
+    frameId: string;
+    documentGeneration: string;
+    rootBackendNodeId: number;
 };
 export type ObservationSources = {
     ax: boolean;
@@ -43,6 +50,7 @@ export type ObservationSources = {
     capturedFrameCount: number;
     gaps: ObservationGap[];
     surface: "active" | "document";
+    surfaceIdentity: ObservationSurfaceIdentity;
 };
 export type ObservationGap = {
     frameId: string | null;

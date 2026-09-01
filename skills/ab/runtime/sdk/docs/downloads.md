@@ -9,10 +9,10 @@ Prefer Locator or ref `setFiles()` when the input element is addressable. A file
 ## Download lifecycle
 
 ```js
-await agent.documentation("downloads");
-const downloads = await tab.watchDownloads();
+await browser.documentation("downloads");
+const downloads = await tab.resources.downloads();
 try {
-  await tab.getByRole("link", { name: "Download report", exact: true }).click();
+  await tab.playwright.getByRole("link", { name: "Download report", exact: true }).click();
   const download = await downloads.waitForDownload({ timeoutMs: 15_000 });
   console.log({
     guid: download.guid,
@@ -36,14 +36,14 @@ try {
 
 A completed record includes a suggested filename and a common `Artifact` handle with private canonical path, bytes, SHA-256, media type, and creation/expiry metadata. `artifact.read()` verifies byte length and digest before returning bytes. These prove AB's adopted byte identity, not the safety or semantic correctness of the file.
 
-When the result must survive `agent.disconnect()`, copy the exact completed artifact path to an explicit caller-owned destination before disconnecting. Do not execute downloaded files. Do not silently overwrite an existing destination.
+When the result must survive `browser.disconnect()`, copy the exact completed artifact path to an explicit caller-owned destination before disconnecting. Do not execute downloaded files. Do not silently overwrite an existing destination.
 
 ## Direct file input
 
 Use an exact absolute path:
 
 ```js
-const input = tab.getByLabel("Attachment", { exact: true });
+const input = tab.playwright.getByLabel("Attachment", { exact: true });
 await input.setFiles("/absolute/path/report.pdf", { write: "diff" });
 ```
 
@@ -56,10 +56,10 @@ AB canonicalizes and validates the path. A missing path is a hard input error. D
 Some controls hide the input and open a chooser after a button click. Prepare the watcher before clicking:
 
 ```js
-const choosers = await tab.watchFileChoosers();
+const choosers = await tab.resources.fileChoosers();
 try {
   const waiting = choosers.waitForChooser({ timeoutMs: 15_000 });
-  await tab.getByRole("button", { name: "Choose file", exact: true }).click();
+  await tab.playwright.getByRole("button", { name: "Choose file", exact: true }).click();
   const chooser = await waiting;
   chooser; // exact target/frame/session/backend-node identity
 } finally {

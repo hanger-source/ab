@@ -3,12 +3,12 @@
 List before opening when an existing signed-in tab may be useful. Track tabs created by the task and close only those tabs.
 
 ```js
-let tabs = await agent.tabs.list();
+let tabs = await browser.tabs.list();
 let tab = tabs.find(value => value.url.startsWith("https://example.com/"));
-if (!tab) tab = await agent.tabs.open("https://example.com/", { waitUntil: "domcontentloaded" });
+if (!tab) tab = await browser.tabs.open("https://example.com/", { waitUntil: "domcontentloaded" });
 ```
 
-`tabs.open(url)` creates a tab and, by default, waits for that navigation's `domcontentloaded`. `waitUntil: "load"` waits for the load event; `"none"` deliberately returns after dispatch. `tab.navigate()` uses the same options. These waits prove browser lifecycle events, not application success.
+`tabs.open(url)` creates a tab and, by default, waits for that navigation's `domcontentloaded`. `waitUntil: "load"` waits for the load event; `"none"` deliberately returns after dispatch. `tab.goto()` uses the same options. These waits prove browser lifecycle events, not application success.
 
 `Tab.id` is the Chrome target id and remains stable across navigation. Frames, documents, realms, observations, refs, element handles, screenshots, and resources have narrower identities and can become stale while the tab remains valid.
 
@@ -21,7 +21,7 @@ After navigation or a meaningful rerender, take a new observation. Do not reuse 
 Tab array position is not identity. Select with a combination of `id`, URL, title, active state, and a new observation:
 
 ```js
-tabs = await agent.tabs.list();
+tabs = await browser.tabs.list();
 const candidates = tabs.filter(t => t.url.startsWith("https://app.example.com/"));
 for (const candidate of candidates) {
   await candidate.refresh();
@@ -39,7 +39,7 @@ Maintain explicit ownership in the Node session. Reusing an existing tab does no
 
 ```js
 const taskTabs = new Set();
-const created = await agent.tabs.open("about:blank");
+const created = await browser.tabs.open("about:blank");
 taskTabs.add(created.id);
 ```
 
@@ -48,9 +48,9 @@ The tab initially selected by a user, coordinator, or benchmark is the task entr
 If an operation can open a popup, capture the baseline before the trigger and compare ids afterwards. Do not assume the popup is last or active:
 
 ```js
-const before = new Set((await agent.tabs.list()).map(value => value.id));
+const before = new Set((await browser.tabs.list()).map(value => value.id));
 await opener.click({ write: "none" });
-const after = await agent.tabs.list();
+const after = await browser.tabs.list();
 const opened = after.filter(value => !before.has(value.id));
 for (const child of opened) taskTabs.add(child.id);
 ```
@@ -79,7 +79,7 @@ Close only ids in the task-owned set:
 
 ```js
 for (const id of taskTabs) {
-  const owned = await agent.tabs.get(id).catch(() => null);
+  const owned = await browser.tabs.get(id).catch(() => null);
   if (owned) await owned.close();
 }
 ```

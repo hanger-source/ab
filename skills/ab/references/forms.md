@@ -8,10 +8,10 @@ On an unfamiliar structured form, do not discover widget behavior by attempting 
 
 ```js
 await tab.ax.write("state");
-const origin = tab.getByRole("textbox", { name: "From:", exact: true });
+const origin = tab.playwright.getByRole("textbox", { name: "From:", exact: true });
 // The presented state showed the unnamed date input as the third textbox.
-const departure = tab.getByRole("textbox").nth(2);
-const search = tab.getByRole("button", { name: "Search", exact: true });
+const departure = tab.playwright.getByRole("textbox").nth(2);
+const search = tab.playwright.getByRole("button", { name: "Search", exact: true });
 
 const [originState, departureState] = await Promise.all([
   origin.inspect({ attributes: ["aria-autocomplete", "placeholder"] }),
@@ -32,9 +32,9 @@ Use Locators for these stable controls even in a one-off task. Reserve short AX 
 `fill()` replaces the current value and is the normal choice for inputs and textareas. `type()` emits keyboard input and is appropriate when the page depends on per-key behavior. `clear()` is explicit when empty state itself matters.
 
 ```js
-await tab.getByLabel("Email", { exact: true }).fill("agent@example.com", { write: "diff" });
-await tab.getByLabel("Search").type("quarterly report", { delayMs: 25 });
-await tab.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
+await tab.playwright.getByLabel("Email", { exact: true }).fill("agent@example.com", { write: "diff" });
+await tab.playwright.getByLabel("Search").type("quarterly report", { delayMs: 25 });
+await tab.playwright.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
 ```
 
 Do not log or echo secret values after entry. If a framework rerenders the field, resolve the Locator again or take a fresh AX state; do not keep an old element handle by default.
@@ -44,8 +44,8 @@ Do not log or echo secret values after entry. If a framework rerenders the field
 Use `check()` / `uncheck()` for checkbox state and `selectOption()` for native select values:
 
 ```js
-await tab.getByLabel("Send a copy").check({ write: "diff" });
-await tab.getByLabel("Region").selectOption("ap-southeast-1", { write: "diff" });
+await tab.playwright.getByLabel("Send a copy").check({ write: "diff" });
+await tab.playwright.getByLabel("Region").selectOption("ap-southeast-1", { write: "diff" });
 ```
 
 Custom comboboxes are interactive widgets, not native selects. Observe their roles and use click/type/press against the controls the page actually exposes.
@@ -63,7 +63,7 @@ Autocomplete entry is a commit protocol, not a text assignment:
 5. Read `inputValue()` from the stable Locator and verify the committed value.
 
 ```js
-const destination = tab.getByRole("textbox", { name: "To:", exact: true });
+const destination = tab.playwright.getByRole("textbox", { name: "To:", exact: true });
 const committed = await destination.fillAndSelectSuggestion(
   "White River, VT",
   "White River, VT",
@@ -83,11 +83,11 @@ An action-produced diff is captured immediately after input dispatch. It may con
 A readonly text input is normally the trigger for a datepicker or another owned widget. Do not call `fill()`, try alternate date strings, or mutate it through `evaluate()`. Click the stable Locator, then operate the popup from a fresh observation:
 
 ```js
-const date = tab.getByRole("textbox").nth(2);
+const date = tab.playwright.getByRole("textbox").nth(2);
 if ((await date.inspect()).readOnly) {
   await date.click();
   // Navigate month/year controls when necessary, then click the exact day
-  // using a ref from the AgentLocator click's presented popup observation.
+  // using a ref from the Locator click's presented popup observation.
   await tab.ax.click("<fresh-day-ref>");
   const committedDate = await date.inputValue();
 }
@@ -106,7 +106,7 @@ Do not silently bypass disabled controls, overlay interception, or validation wi
 Prefer `setFiles()` on an addressable file input:
 
 ```js
-await tab.getByLabel("Attachment").setFiles("/absolute/path/report.pdf", { write: "diff" });
+await tab.playwright.getByLabel("Attachment").setFiles("/absolute/path/report.pdf", { write: "diff" });
 ```
 
 Verify the exact absolute path before the call. For a chooser-driven control, open `watchFileChoosers()` before clicking and use the emitted frame/backend-node identity. Do not replace a missing file with a similarly named path.

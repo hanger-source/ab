@@ -1,6 +1,6 @@
 # Init-script registrations and instances
 
-`tab.addInitScript()` registers an async function body with explicit name, world, frame scope, JSON args, and client ownership. Isolated world is the default; use main world only when page globals must be patched.
+`tab.resources.initScripts()` registers an async function body with explicit name, world, frame scope, JSON args, and client ownership. Isolated world is the default; use main world only when page globals must be patched.
 
 Rust installs the binding and future-document script in every matching current or newly attached session, resumes paused targets, then explicitly activates the current document. Each live instance is identified by registration, session, execution context, frame, and document generation.
 
@@ -11,8 +11,8 @@ Disposing a registration removes future injection, invokes cleanup in live insta
 ## Registration example
 
 ```js
-await agent.documentation("init-scripts");
-const registration = await tab.addInitScript({
+await browser.documentation("init-scripts");
+const registration = await tab.resources.initScripts({
   name: "order-monitor",
   world: "isolated",
   frames: "all",

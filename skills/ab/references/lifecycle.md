@@ -6,9 +6,9 @@ AB has three deliberately different lifetimes:
 2. The Rust daemon is shared by compatible clients and stays hidden behind `connect()`.
 3. The headed Chrome and its fixed AB profile survive client and daemon replacement.
 
-Do not collapse these into one "browser process" lifetime. `agent.disconnect()` releases only the current client's server-owned objects. It does not close Chrome or erase the profile.
+Do not collapse these into one "browser process" lifetime. `browser.disconnect()` releases only the current client's server-owned objects. It does not close Chrome or erase the profile.
 
-Socket closure is the authoritative server cleanup boundary. `agent.disconnect()` closes the client transport first; Rust then releases every observation, artifact, element, CDP session, and Resource owned by that client. Locally cached presentation objects are discarded afterward and cannot make a completed transport disconnect fail merely because an individual dispose request is no longer reachable.
+Socket closure is the authoritative server cleanup boundary. `browser.disconnect()` closes the client transport first; Rust then releases every observation, artifact, element, CDP session, and Resource owned by that client. Locally cached presentation objects are discarded afterward and cannot make a completed transport disconnect fail merely because an individual dispose request is no longer reachable.
 
 ## Start a task
 
@@ -17,7 +17,7 @@ Connect once and enumerate before creating state:
 ```js
 const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
 const agent = await connect();
-let tabs = await agent.tabs.list();
+let tabs = await browser.tabs.list();
 ```
 
 Keep the same managed JavaScript kernel for follow-up expressions. `connect()` is idempotent within that process and returns the same pending or connected Agent facade until it is disconnected.
@@ -28,7 +28,7 @@ Record task ownership locally:
 const openedByTask = new Set();
 let tab = tabs.find(t => t.url.startsWith("https://example.com/"));
 if (!tab) {
-  tab = await agent.tabs.open("https://example.com/");
+  tab = await browser.tabs.open("https://example.com/");
   openedByTask.add(tab.id);
 }
 ```
@@ -43,7 +43,7 @@ Keep resource handles in variables and pair every creation with deterministic cl
 
 ```js
 const resources = [];
-const network = await tab.observeNetwork();
+const network = await tab.resources.network();
 resources.push(network);
 try {
   // Trigger and inspect the traffic.
@@ -61,14 +61,14 @@ Dispose in this order:
 1. event resources and init-script registrations;
 2. element handles, observations, screenshots, and CDP sessions kept by user code;
 3. only tabs recorded as task-created, when the task does not intentionally leave them open;
-4. `agent.disconnect()`.
+4. `browser.disconnect()`.
 
 ```js
 for (const targetId of openedByTask) {
-  const current = await agent.tabs.get(targetId).catch(() => null);
+  const current = await browser.tabs.get(targetId).catch(() => null);
   if (current) await current.close();
 }
-await agent.disconnect();
+await browser.disconnect();
 ```
 
 Do not invent a daemon stop step. Chrome persistence is a product behavior, not leaked cleanup.

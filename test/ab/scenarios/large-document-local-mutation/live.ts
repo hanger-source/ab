@@ -3,18 +3,18 @@ import http from "node:http";
 import { join } from "node:path";
 import {
   connect,
-  type AgentImagePresentation,
-  type AgentPresenter,
-  type AgentTextPresentation,
+  type ImagePresentation,
+  type Presenter,
+  type TextPresentation,
 } from "../../../../sdk/ts/src/agent/index.ts";
 
 const runtimeDirectory = requiredEnv("AB_RUNTIME_DIR");
-const presentations: AgentTextPresentation[] = [];
-const presenter: AgentPresenter = {
+const presentations: TextPresentation[] = [];
+const presenter: Presenter = {
   presentText(value) {
     presentations.push(value);
   },
-  presentImage(value: AgentImagePresentation) {
+  presentImage(value: ImagePresentation) {
     throw new Error(`unexpected image presentation ${value.screenshot.id}`);
   },
 };
@@ -35,7 +35,7 @@ try {
   const browser = await connect({ presenter, timeoutMs: 20_000 });
   chromePid = browser.identity.chrome.pid;
   const tab = await browser.tabs.open(`http://127.0.0.1:${address.port}/page`);
-  await tab.waitFor({ selector: "#field-449", state: "attached", timeoutMs: 10_000 });
+  await tab.playwright.waitFor({ selector: "#field-449", state: "attached", timeoutMs: 10_000 });
 
   try {
     await tab.ax.write("state", { mode: "full", surface: "active", timeoutMs: 20_000 });
@@ -73,7 +73,7 @@ try {
     truncated: baseline.truncated,
   };
   const started = performance.now();
-  const action = await tab.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
+  const action = await tab.playwright.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
   const elapsedMs = Math.round(performance.now() - started);
   const current = tab.ax.actionBaseline();
   assert(current, "Agent did not advance its presented baseline after the action");
@@ -106,7 +106,7 @@ try {
     "interactive fixture unexpectedly contains full-tree StaticText output",
   );
   const interactiveStarted = performance.now();
-  const interactiveAction = await tab.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
+  const interactiveAction = await tab.playwright.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
   const interactiveElapsedMs = Math.round(performance.now() - interactiveStarted);
   const interactiveCurrent = tab.ax.actionBaseline();
   assert(interactiveCurrent?.diff, "interactive Agent action did not return a diff observation");

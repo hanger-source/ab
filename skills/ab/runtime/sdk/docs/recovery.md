@@ -54,7 +54,7 @@ A timed-out waiter only says that no matching event was observed within its inte
 1. Preserve the structured error.
 2. Refresh tab metadata and obtain a new bounded AX state.
 3. Reconcile whether the intended side effect already occurred.
-4. Load `agent.documentation("diagnostics")` for runtime-specific failures.
+4. Load `browser.documentation("diagnostics")` for runtime-specific failures.
 5. Use typed frame/resource inspection.
 6. Use an explicit CDP session only for a remaining low-level fact.
 

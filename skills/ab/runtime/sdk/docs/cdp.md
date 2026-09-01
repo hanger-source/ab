@@ -1,16 +1,16 @@
 # Explicit CDP sessions
 
-Use `await tab.cdp()` only to inspect a browser-protocol fact or invoke a primitive that AB has not promoted to a typed API. `send(method, params)` targets the tab's current root session; dispose the session when finished.
+Use `await tab.dev.cdp()` only to inspect a browser-protocol fact or invoke a primitive that AB has not promoted to a typed API. `send(method, params)` targets the tab's current root session; dispose the session when finished.
 
 Do not rebuild normal AX capture, Locator resolution, actionability, input, navigation, downloads, or resource observation from ad-hoc CDP calls. Those AB surfaces carry document, frame, session, artifact, cancellation, and ownership rules that a raw command does not reproduce.
 
-For OOPIF-sensitive diagnostics, first inspect `tab.frames()` and `tab.realms()`. Never assume a backend node id, request id, or execution context id is globally unique across sessions.
+For OOPIF-sensitive diagnostics, first inspect `tab.dev.frames()` and `tab.dev.realms()`. Never assume a backend node id, request id, or execution context id is globally unique across sessions.
 
 ## Session use
 
 ```js
-await agent.documentation("cdp");
-const cdp = await tab.cdp();
+await browser.documentation("cdp");
+const cdp = await tab.dev.cdp();
 try {
   await cdp.send("Performance.enable");
   const metrics = await cdp.send("Performance.getMetrics");
@@ -28,7 +28,7 @@ Use protocol method names and parameters from the Chrome version actually launch
 
 ## Root and child sessions
 
-`tab.cdp()` targets the current root session. `frame.cdp()` targets the Chrome target that owns that captured frame. A cross-origin frame can have a different target/session; enumerate frames first and choose explicitly.
+`tab.dev.cdp()` targets the current root session. `frame.cdp()` targets the Chrome target that owns that captured frame. A cross-origin frame can have a different target/session; enumerate frames first and choose explicitly.
 
 Do not pass a backend node id, execution context id, request id, or loader id between sessions without its owning identity. Identical numeric/string ids can exist in different CDP sessions.
 

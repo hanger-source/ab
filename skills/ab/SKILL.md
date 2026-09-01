@@ -29,14 +29,14 @@ For interactive work, use one persistent Node REPL MCP execution tool. In Codex,
 
 Discover the JavaScript execution tool when its exact callable id is not already visible; do not use reset, wait, cancel, or module-directory helpers merely to expose it. If two compatible Node REPL Tools are present, use the one selected by the host configuration and keep the entire task in it; never split one Agent session across two kernels.
 
-This is one code-composition Tool, not a menu of browser actions. Keep `agent`, tabs, observations, locators, and resources in that same JavaScript kernel across calls. Use `nodeRepl.write(value)` for decision-relevant computed output. AB's Agent Presenter sends AX/documentation text and screenshots through the Tool's public text/image content channel automatically.
+This is one code-composition Tool, not a menu of browser actions. Keep `browser`, tabs, observations, locators, and resources in that same JavaScript kernel across calls. Use `nodeRepl.write(value)` for decision-relevant computed output. AB's Presenter sends AX/documentation text and screenshots through the Tool's public text/image content channel automatically.
 
 Import the Skill client by its absolute path. Derive `<ab-skill-root>` from the directory containing this `SKILL.md`; do not substitute an npm package name, project source path, or guessed `.d.ts` path.
 
 ```ts
 const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
-const agent = await connect();
-let tabs = await agent.tabs.list();
+const browser = await connect();
+let tabs = await browser.tabs.list();
 ```
 
 If `scripts/ab-client.mjs` or its packaged runtime is absent, stop and report that the AB Skill installation is incomplete. Do not search the project or npm installation for another copy.
@@ -50,13 +50,13 @@ If a cell yields a running id, use the Tool's wait or cancel operation for that 
 Inspect existing tabs before opening another:
 
 ```ts
-tabs = await agent.tabs.list();
+tabs = await browser.tabs.list();
 tabs
 let tab = tabs.find((candidate) => candidate.url.startsWith("https://example.com/"));
-if (!tab) tab = await agent.tabs.open("https://example.com/");
+if (!tab) tab = await browser.tabs.open("https://example.com/");
 ```
 
-Track tabs created for the task. Close only those tabs when cleanup is appropriate. `agent.disconnect()` releases this SDK client's observations and event resources; it does not close tabs, Chrome, or the daemon.
+Track tabs created for the task. Close only those tabs when cleanup is appropriate. `browser.disconnect()` releases this SDK client's observations and event resources; it does not close tabs, Chrome, or the daemon.
 
 A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits that task's scope. Add its id to the task-owned tab set, inspect it by id plus fresh AX state, and continue there when it contains the intended workflow. Do not abandon a valid child tab merely because the coordinator originally named only the starting tab; do not touch unrelated pre-existing tabs.
 
@@ -67,7 +67,7 @@ Read [browser and task lifecycle](references/lifecycle.md) when reusing tabs, re
 1. Unknown or changed UI: use `tab.ax.write("state")` and act on the displayed text and refs.
 2. Stable, repeated UI: use semantic `Locator` builders.
 3. Visual-only or layout-dependent UI: use screenshot plus CUA with the exact `viewportId`. This includes canvas, maps, remote desktops, and a task-relevant control whose AX/ref inspection exposes no usable name, role, or other semantic identity.
-4. Page JavaScript facts: use functional `tab.evaluate()`.
+4. Page JavaScript facts: use functional `tab.dev.evaluate()`.
 5. Browser-protocol diagnostics or an unsupported browser primitive: use an explicit `CDPSession`.
 
 Do not silently turn a failed ref or Locator action into JavaScript or coordinate input. Re-observe the page, explain the changed fact, and choose the next surface deliberately. When one bounded semantic inspection establishes that the intended visible control has no usable identity, stop repeating empty attribute inspection: capture pixels, visually identify the unambiguous intended control, and use viewport-bound CUA. Do not guess between visually ambiguous or consequential controls.
@@ -96,18 +96,18 @@ The Agent facade defaults to `mode: "full", surface: "active"`. When a modal or 
 ## Locators for stable intent
 
 ```ts
-await tab.getByLabel("Email").fill("agent@example.com");
-await tab.getByRole("button", { name: "Continue", exact: true }).click();
-await tab.locator("article.result").nth(0).click();
-const card = tab.locator("article.result").filter({ hasText: "Ready", visible: true });
-await card.locator(tab.getByRole("button", { name: "Open" })).click();
+await tab.playwright.getByLabel("Email").fill("agent@example.com");
+await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
+await tab.playwright.locator("article.result").nth(0).click();
+const card = tab.playwright.locator("article.result").filter({ hasText: "Ready", visible: true });
+await card.locator(tab.playwright.getByRole("button", { name: "Open" })).click();
 ```
 
 Prefer role, label, text, placeholder, alt text, title, or test id over CSS. Use CSS when the page exposes no stable semantic identity. Locator actions are strict; `count()` and `all()` are the multi-match operations.
 
 Locator text and accessible-name arguments are literal strings in the current public API. Do not pass JavaScript `RegExp` objects or Playwright-style regex name filters; use an observed exact string, a literal substring with `exact: false`, or compose/filter Locators.
 
-In `@hanger-source/ab/agent`, these builders return `AgentLocator`. Mutations default to `write: "diff"`: Rust captures the immediate post-dispatch observation in the same action transaction, the Presenter displays it, and that exact observation becomes the short-ref baseline. This does not promise that later timers, requests, animations, autocomplete results, or SPA work have completed. Wait for the semantic, lifecycle, or resource fact needed by the next decision. `AgentLocator.waitFor()` presents a fresh full state by default after its condition succeeds; pass `{ write: "none" }` for synchronization only. Core `@hanger-source/ab` Locators keep explicit `observe` and pure wait semantics and never present content.
+In `@hanger-source/ab/agent`, these builders return `Locator`. Mutations default to `write: "diff"`: Rust captures the immediate post-dispatch observation in the same action transaction, the Presenter displays it, and that exact observation becomes the short-ref baseline. This does not promise that later timers, requests, animations, autocomplete results, or SPA work have completed. Wait for the semantic, lifecycle, or resource fact needed by the next decision. `Locator.waitFor()` presents a fresh full state by default after its condition succeeds; pass `{ write: "none" }` for synchronization only. Core `@hanger-source/ab` Locators keep explicit `observe` and pure wait semantics and never present content.
 
 Use `locator.elementHandle()` or `ref.elementHandle()` only when several operations must stay bound to the same actual node. Element handles do not rerun a Locator after navigation and must be disposed.
 
@@ -150,7 +150,7 @@ Use the same pattern for intermediate timed mutations when the next decision req
 Before the first screenshot or coordinate action in this Agent session, load the screenshot topic. Then request semantic state and pixels in one server operation when the task genuinely needs both:
 
 ```ts
-await agent.documentation("screenshot");
+await browser.documentation("screenshot");
 await tab.ax.write("both");
 ```
 
@@ -180,15 +180,15 @@ Never reuse coordinates with a different `viewportId`. Take a new screenshot aft
 The Skill runtime owns version-matched topic documentation. The Agent facade rejects advanced calls until their topic has been presented successfully. Load the applicable topic instead of inspecting `.d.ts` or expanding the main Skill into an API catalogue:
 
 ```ts
-void await agent.documentation("network");
-void await agent.documentation("downloads");
-void await agent.documentation("init-scripts");
-void await agent.documentation("cdp");
+void await browser.documentation("network");
+void await browser.documentation("downloads");
+void await browser.documentation("init-scripts");
+void await browser.documentation("cdp");
 ```
 
 Observers must exist before the action that can emit their event and must be disposed. Resource completeness belongs to Rust; never hide a gap or closed/incomplete stream.
 
-The same topic files are shipped in the `ab` npm package and exposed by `agent.documentation()`, including `await agent.documentation("api")` for the complete public signature catalogue. The Skill references are their source of truth; do not look through `.d.ts` or implementation source to rediscover ordinary API usage.
+The same topic files are shipped in the `ab` npm package and exposed by `browser.documentation()`, including `await browser.documentation("api")` for the complete public signature catalogue. The Skill references are their source of truth; do not look through `.d.ts` or implementation source to rediscover ordinary API usage.
 
 ## Cancellation and waits
 
@@ -196,7 +196,7 @@ Use `timeoutMs` for mechanical limits and `AbortSignal` for caller cancellation:
 
 ```ts
 const controller = new AbortController();
-const pending = tab.getByText("Ready").click({
+const pending = tab.playwright.getByText("Ready").click({
   timeoutMs: 15_000,
   signal: controller.signal,
 });
@@ -208,7 +208,7 @@ Use [navigation and waits](references/navigation-waits.md) to distinguish browse
 
 ## Cleanup
 
-Dispose observations, screenshots/artifacts, element handles, CDP sessions, and every event/init-script resource created by the task. Close only task-created tabs. Call `agent.disconnect()` when the JavaScript session is finished; this leaves the persistent Chrome available for later tasks.
+Dispose observations, screenshots/artifacts, element handles, CDP sessions, and every event/init-script resource created by the task. Close only task-created tabs. Call `browser.disconnect()` when the JavaScript session is finished; this leaves the persistent Chrome available for later tasks.
 
 Read references only for the current operation:
 

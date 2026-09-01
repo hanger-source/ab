@@ -9,8 +9,8 @@ Dispose observers when the diagnostic or interaction window ends. Do not leave d
 ## Console observation
 
 ```js
-await agent.documentation("console-dialogs");
-const consoleEvents = await tab.observeConsole();
+await browser.documentation("console-dialogs");
+const consoleEvents = await tab.resources.console();
 try {
   const event = await consoleEvents.waitForMessage(
     candidate => candidate.method === "Runtime.consoleAPICalled",
@@ -32,10 +32,10 @@ Console absence is meaningful only when the observer was open before the behavio
 Open the watcher before the action and start waiting before or immediately with the trigger:
 
 ```js
-const dialogs = await tab.watchDialogs();
+const dialogs = await tab.resources.dialogs();
 try {
   const opening = dialogs.waitForDialog({ timeoutMs: 15_000 });
-  const action = tab.getByRole("button", { name: "Delete", exact: true }).click();
+  const action = tab.playwright.getByRole("button", { name: "Delete", exact: true }).click();
   const dialog = await opening;
   console.log({ type: dialog.type, message: dialog.message, url: dialog.url });
   await dialog.dismiss();

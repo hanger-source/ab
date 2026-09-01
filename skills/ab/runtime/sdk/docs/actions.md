@@ -32,8 +32,8 @@ Do not use evaluate to bypass actionability or stale identity. Do not reuse CUA 
 AX refs, Locators, ElementHandles, and CUA return the same Rust-produced `ActionResult` for mutations:
 
 ```js
-const baseline = await tab.ax.snapshot({ mode: "full", surface: "active" });
-const result = await tab.getByRole("button", { name: "Save" }).click({
+const baseline = await coreTab.ax.snapshot({ mode: "full", surface: "active" });
+const result = await coreTab.getByRole("button", { name: "Save" }).click({
   observe: "diff",
   baseline,
 });
@@ -55,9 +55,9 @@ Input dispatch and the optional post-action observation are separate outcomes. O
 
 `observe: "diff"` is one server-side target-lane transaction: Rust resolves the caller's explicit baseline, arms browser event observers, dispatches once, and captures only the post-action state. This removes the former full-page pre-capture from the mutation's deadline and prevents a request from timing out before its click while later clicking in the background. For the resulting same-document observation, unchanged frame/document/backend-node identities keep their baseline `eN`; genuinely new nodes receive non-conflicting refs, so the model-visible diff is not inflated by positional renumbering.
 
-In `@hanger-source/ab/agent`, semantic builders return `AgentLocator`. Its mutations default to `write: "diff"` and reuse both the identity and exact capture shape of the last successfully presented observation. If no state has been presented yet, the first mutation requests one post-action `state` instead of inventing a baseline. The Presenter renders the compact Myers text diff and advances the same per-tab short-ref baseline used by `AgentAX`. `{ write: "none" }` preserves the current baseline; `{ write: "state" }` requests and presents one post-action full state. Agent short-ref and Locator actions accept `write`, not Core `observe` or `baseline`; passing those Core-only fields fails before dispatch instead of being silently overridden. Core `@hanger-source/ab` continues to return ordinary Locator with explicit observation ownership and no presentation side effect.
+In `@hanger-source/ab/agent`, `tab.playwright` builders return `Locator`. Its mutations default to `write: "diff"` and reuse both the identity and exact capture shape of the last successfully presented observation. If no state has been presented yet, the first mutation requests one post-action `state` instead of inventing a baseline. The Presenter renders the compact Myers text diff and advances the same per-tab short-ref baseline used by `AX`. `{ write: "none" }` preserves the current baseline; `{ write: "state" }` requests and presents one post-action full state. Agent short-ref and Locator actions accept `write`, not Core `observe` or `baseline`; passing those Core-only fields fails before dispatch instead of being silently overridden. Core `@hanger-source/ab` continues to return ordinary Locator with explicit observation ownership and no presentation side effect.
 
-`AgentLocator.waitFor()` composes the existing Rust semantic wait with Agent presentation. After the requested attached/detached/visible/hidden fact succeeds, it presents a fresh full state by default and advances the short-ref baseline. Pass `{ write: "none" }` when code only needs synchronization. Core `Locator.waitFor()` remains a pure wait.
+Agent `Locator.waitFor()` composes the existing Rust semantic wait with Agent presentation. After the requested attached/detached/visible/hidden fact succeeds, it presents a fresh full state by default and advances the short-ref baseline. Pass `{ write: "none" }` when code only needs synchronization. Core `Locator.waitFor()` remains a pure wait.
 
 ## AX short refs versus explicit refs
 
@@ -92,10 +92,10 @@ Do not pass a ref id obtained from `get()` to `tab.ax.click()`: it was never est
 Use the strongest stable identity exposed by the page:
 
 ```js
-const dialog = tab.getByRole("dialog").filter({ visible: true });
-const save = dialog.locator(tab.getByRole("button", { name: "Save", exact: true }));
-const matchingCard = tab.locator("article").filter({
-  has: tab.getByRole("heading", { name: "Quarterly report", exact: true }),
+const dialog = tab.playwright.getByRole("dialog").filter({ visible: true });
+const save = dialog.locator(tab.playwright.getByRole("button", { name: "Save", exact: true }));
+const matchingCard = tab.playwright.locator("article").filter({
+  has: tab.playwright.getByRole("heading", { name: "Quarterly report", exact: true }),
   hasText: "Ready",
   visible: true,
 });

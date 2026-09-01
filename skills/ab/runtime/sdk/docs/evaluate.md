@@ -1,6 +1,6 @@
 # Functional evaluate
 
-Use `tab.evaluate(fn, ...args)`, `frame.evaluate()`, or `realm.evaluate()` for a page JavaScript fact that does not have a typed AB operation. Functions and arguments are serialized explicitly; return values use AB's typed value transport.
+Use `tab.dev.evaluate(fn, ...args)`, `frame.evaluate()`, or `realm.evaluate()` for a page JavaScript fact that does not have a typed AB operation. Functions and arguments are serialized explicitly; return values use AB's typed value transport.
 
 Evaluate is not the default element finder. Do not repeatedly write `querySelector` scripts when AX refs or Locators express the target. Do not use evaluate to bypass stale document, actionability, hit testing, file upload, dialog, or input semantics.
 
@@ -11,7 +11,7 @@ Choose frame or realm evaluation when scope matters. A realm is an exact executi
 Pass a JavaScript function and explicit serializable arguments:
 
 ```js
-const result = await tab.evaluate(
+const result = await tab.dev.evaluate(
   (selector, limit) => [...document.querySelectorAll(selector)]
     .slice(0, limit)
     .map(node => ({ text: node.textContent, href: node.href ?? null })),
@@ -26,11 +26,11 @@ Do not return DOM nodes, functions, cyclic objects, unbounded page state, or sec
 
 ## Choosing scope
 
-- `tab.evaluate()`: root frame's current default realm.
+- `tab.dev.evaluate()`: root frame's current default realm.
 - `frame.evaluate()`: current default realm of the captured exact frame/document.
 - `realm.evaluate()`: the captured exact execution context.
 
-Inspect `tab.frames()` / `tab.realms()` before choosing non-root scope. Do not select a realm only by array position.
+Inspect `tab.dev.frames()` / `tab.dev.realms()` before choosing non-root scope. Do not select a realm only by array position.
 
 ## Appropriate uses
 

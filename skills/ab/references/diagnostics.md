@@ -11,7 +11,7 @@ AB has no status/start/stop CLI. Diagnose through the same SDK and exact runtime
 - `daemon_start_timeout`: the exact launched runtime did not publish a new ready or structured failed startup state before the deadline; inspect the AB daemon log under its Application Support data root.
 - `transport_closed` at `handshake.socket`: the selected product daemon closed before returning a structured handshake result. Do not continue with an undefined `agent` and do not loop retries. Report the exact `kind`, `stage`, and message; the runtime must be diagnosed or fixed outside the browser task.
 
-`agent.documentation("diagnostics")` is unavailable until connection succeeds. This reference is the authoritative pre-connection equivalent; a connection failure never requires inspecting implementation files.
+`browser.documentation("diagnostics")` is unavailable until connection succeeds. This reference is the authoritative pre-connection equivalent; a connection failure never requires inspecting implementation files.
 
 ## Browser state failures
 
@@ -24,7 +24,7 @@ AB has no status/start/stop CLI. Diagnose through the same SDK and exact runtime
 ## Deliberate low-level inspection
 
 ```ts
-const cdp = await tab.cdp();
+const cdp = await tab.dev.cdp();
 try {
   const metrics = await cdp.send("Performance.getMetrics");
   metrics
@@ -59,13 +59,13 @@ Do not reduce a failure to `Error: failed`. `kind` is the stable class, `stage` 
 
 ```js
 const traceId = error?.context?.traceId;
-const trace = agent.diagnostics.snapshot({ traceId });
+const trace = browser.diagnostics.snapshot({ traceId });
 console.log(trace.complete, trace.dropped, trace.events);
 ```
 
 Each event carries `traceId`, `requestId`, `method`, `target`, `name`, `sequence`, `timestampUnixMs` and bounded `detail`. A normal request has ordered `dispatched` and `settled` stages. An interrupted mutation additionally emits `operation.settled` after the underlying operation reaches terminal; its `settled` stage describes the caller's `outcome_unknown`, not rollback. `complete:false` means older local trace events were evicted; it must not be presented as a complete history. Trace detail deliberately omits params, page content, form values, cookies, authorization and network bodies.
 
-Use `agent.diagnostics.onTrace(listener)` only when future timing matters, and unsubscribe deterministically. `agent.diagnostics.clear()` clears this client process's local history; it does not restart or mutate the daemon or Chrome.
+Use `browser.diagnostics.onTrace(listener)` only when future timing matters, and unsubscribe deterministically. `browser.diagnostics.clear()` clears this client process's local history; it does not restart or mutate the daemon or Chrome.
 
 ## Documentation and operation failures
 
@@ -89,7 +89,7 @@ If documentation presentation itself fails, its topic is not marked read. Repair
 
 ## Diagnose without a CLI
 
-Current client state is `agent.connected`; browser/daemon identity is `agent.identity`; tab state comes from `agent.tabs.list()` and `tab.refresh()`; resource state comes from the resource object and `refresh()`. AB intentionally exposes no status command.
+Current client state is `browser.connected`; browser/daemon identity is `browser.identity`; tab state comes from `browser.tabs.list()` and `tab.refresh()`; resource state comes from the resource object and `refresh()`. AB intentionally exposes no status command.
 
 ## Retry decision
 

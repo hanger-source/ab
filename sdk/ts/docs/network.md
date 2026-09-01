@@ -1,6 +1,6 @@
 # Network observation
 
-Open `tab.observeNetwork()` before the action that emits traffic. The Rust resource owns domain leases, event sequencing, completeness, Chrome buffering, AB retention, memory spilling, and cleanup across the tab's current sessions.
+Open `tab.resources.network()` before the action that emits traffic. The Rust resource owns domain leases, event sequencing, completeness, Chrome buffering, AB retention, memory spilling, and cleanup across the tab's current sessions.
 
 Request and response events preserve their originating `sessionId + requestId`. `responseBody()` uses that exact pair, including OOPIF traffic. It never asks the root target to guess which request is meant.
 
@@ -9,8 +9,8 @@ Large bodies use verified artifacts. Per-body and total budgets are explicit; ev
 ## Observe before triggering
 
 ```js
-await agent.documentation("network");
-const network = await tab.observeNetwork({
+await browser.documentation("network");
+const network = await tab.resources.network({
   bodyRetentionBytes: 256 * 1024 * 1024,
   bodyMemoryBytes: 32 * 1024 * 1024,
   maxBodyBytes: 8 * 1024 * 1024,
@@ -19,7 +19,7 @@ const network = await tab.observeNetwork({
   bodyCapture: "all",
 });
 try {
-  await tab.getByRole("button", { name: "Refresh", exact: true }).click();
+  await tab.playwright.getByRole("button", { name: "Refresh", exact: true }).click();
   const response = await network.waitForResponse(
     event => String(event.params.response?.url ?? "").includes("/api/orders"),
     { timeoutMs: 20_000 },

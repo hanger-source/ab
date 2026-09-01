@@ -17,7 +17,7 @@ CUA is for canvas, maps, remote desktops, or other targets whose useful identity
 The Presenter always emits an `AB_SCREENSHOT` record containing the canonical artifact and viewport identity. In the managed Node REPL it then sends the verified PNG bytes through `nodeRepl.emitImage()`, so metadata and pixels belong to one Tool result. In ordinary Node it prints only the record; open that exact path with the host image-viewing capability before reasoning about coordinates.
 
 ```js
-await agent.documentation("screenshot");
+await browser.documentation("screenshot");
 await tab.ax.write("screenshot");
 ```
 

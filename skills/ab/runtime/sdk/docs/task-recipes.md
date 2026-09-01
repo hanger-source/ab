@@ -31,9 +31,9 @@ Start with the Agent facade's full AX state so page instructions and status text
 ## Repeated stable workflow
 
 ```js
-const row = tab.getByRole("row").filter({ hasText: "Order 1042", visible: true });
-await row.locator(tab.getByRole("button", { name: "Open", exact: true })).click({ write: "diff" });
-await tab.getByRole("heading", { name: "Order 1042", exact: true }).count();
+const row = tab.playwright.getByRole("row").filter({ hasText: "Order 1042", visible: true });
+await row.locator(tab.playwright.getByRole("button", { name: "Open", exact: true })).click({ write: "diff" });
+await tab.playwright.getByRole("heading", { name: "Order 1042", exact: true }).count();
 ```
 
 Locators are immutable query plans and resolve at use time. Keep the business identity in the query instead of depending on the current AX ref number.
@@ -41,9 +41,9 @@ Locators are immutable query plans and resolve at use time. Keep the business id
 ## Submit and verify a form
 
 ```js
-await tab.getByLabel("Email", { exact: true }).fill("agent@example.com");
-await tab.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
-await tab.waitFor({ text: "Saved", timeoutMs: 15_000 });
+await tab.playwright.getByLabel("Email", { exact: true }).fill("agent@example.com");
+await tab.playwright.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
+await tab.playwright.waitFor({ text: "Saved", timeoutMs: 15_000 });
 await tab.ax.write("state");
 ```
 
@@ -53,11 +53,11 @@ The final observation, not the successful click call, proves the visible result.
 
 ```js
 await tab.ax.write("state");
-const from = tab.getByRole("textbox", { name: "From:", exact: true });
-const to = tab.getByRole("textbox", { name: "To:", exact: true });
+const from = tab.playwright.getByRole("textbox", { name: "From:", exact: true });
+const to = tab.playwright.getByRole("textbox", { name: "To:", exact: true });
 // The presented state showed the unnamed date input as the third textbox.
-const date = tab.getByRole("textbox").nth(2);
-const submit = tab.getByRole("button", { name: "Search", exact: true });
+const date = tab.playwright.getByRole("textbox").nth(2);
+const submit = tab.playwright.getByRole("button", { name: "Search", exact: true });
 
 // Inspect widget shape in one typed read; do not learn readonly state by failing fill().
 const [fromState, toState, dateState] = await Promise.all([
@@ -89,15 +89,15 @@ if (dateIsReadonly) {
 await submit.click({ write: "diff" });
 ```
 
-The airport names and ref ids above are placeholders for values actually shown by the current page observation. An action-produced diff is immediate and may precede delayed popup work. The invariant is the sequence: stable AgentLocator, explicit semantic option wait, newly presented full state, exact option, committed-value check, then a fresh-resolving submit AgentLocator.
+The airport names and ref ids above are placeholders for values actually shown by the current page observation. An action-produced diff is immediate and may precede delayed popup work. The invariant is the sequence: stable Locator, explicit semantic option wait, newly presented full state, exact option, committed-value check, then a fresh-resolving submit Locator.
 
 ## Observe a request caused by UI
 
 ```js
-await agent.documentation("network");
-const network = await tab.observeNetwork();
+await browser.documentation("network");
+const network = await tab.resources.network();
 try {
-  await tab.getByRole("button", { name: "Refresh", exact: true }).click();
+  await tab.playwright.getByRole("button", { name: "Refresh", exact: true }).click();
   const response = await network.waitForResponse(
     event => String(event.params.response?.url ?? "").includes("/api/orders"),
     { timeoutMs: 20_000 },
@@ -116,7 +116,7 @@ Open the observer before the trigger and preserve event session identity.
 Use this after a bounded semantic observation or inspection establishes that the visible intended control has no usable identity. It is a deliberate surface change, not a retry of a failed semantic click. If the pixels still do not distinguish the intended control or its consequence, stop rather than guess.
 
 ```js
-await agent.documentation("screenshot");
+await browser.documentation("screenshot");
 const shot = await tab.ax.get("screenshot");
 // Open shot.path with the host image viewer and choose coordinates from those pixels.
 await tab.cua.click({ x: 320, y: 180, viewportId: shot.viewportId });
@@ -131,7 +131,7 @@ Take a new screenshot after scrolling, resizing, navigation, or layout change.
 When the intended content appears only as static text and has no action ref, inspect `state.sources.surface`. If it is `active`, do not select a covered control or hidden render iframe from the underlying document. Capture the active semantic state and pixels atomically:
 
 ```js
-await agent.documentation("screenshot");
+await browser.documentation("screenshot");
 const page = await tab.ax.get("both");
 // Open page.screenshot.path with the host image viewer and choose the visible target.
 await tab.cua.click({
@@ -182,11 +182,11 @@ For wording such as “received N”, “add N”, or “increase by N”, the r
 ## Cross-origin frame
 
 ```js
-await agent.documentation("frames");
-const frames = await tab.frames();
+await browser.documentation("frames");
+const frames = await tab.dev.frames();
 const checkout = frames.find(frame => frame.url.includes("payments.example"));
 if (!checkout) throw new Error("payment frame not present");
-await tab.getByLabel("Card number").inFrame(checkout.id).fill("…");
+await tab.playwright.getByLabel("Card number").inFrame(checkout.id).fill("…");
 ```
 
 Select a frame by inspected identity. Never guess that an iframe is same-origin or belongs to the root CDP session.
@@ -194,10 +194,10 @@ Select a frame by inspected identity. Never guess that an iframe is same-origin 
 ## Download lifecycle
 
 ```js
-await agent.documentation("downloads");
-const downloads = await tab.watchDownloads();
+await browser.documentation("downloads");
+const downloads = await tab.resources.downloads();
 try {
-  await tab.getByRole("link", { name: "Download report", exact: true }).click();
+  await tab.playwright.getByRole("link", { name: "Download report", exact: true }).click();
   const download = await downloads.waitForDownload();
   const completed = await download.waitForCompleted({ timeoutMs: 60_000 });
   completed.artifact;

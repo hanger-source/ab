@@ -11,7 +11,7 @@ const presented = { text: [], images: [] };
 let chromePid;
 
 try {
-  const agent = await connect({
+  const browser = await connect({
     presenter: {
       presentText(value) {
         presented.text.push(value);
@@ -23,13 +23,13 @@ try {
       },
     },
   });
-  chromePid = agent.identity.chrome.pid;
+  chromePid = browser.identity.chrome.pid;
   try {
-    const observationDocumentation = await agent.documentation("observation");
+    const observationDocumentation = await browser.documentation("observation");
     assert.equal(typeof observationDocumentation, "string");
     assert(observationDocumentation.length > 0);
-    const tab = await agent.tabs.open();
-    await tab.navigate(
+    const tab = await browser.tabs.open();
+    await tab.goto(
       "data:text/html,<title>AB Node ESM</title><button>Node package action</button>",
       { waitUntil: "load" },
     );
@@ -40,7 +40,7 @@ try {
         && error?.stage === "agent.documentation"
         && error?.details?.topic === "screenshot",
     );
-    const screenshotDocumentation = await agent.documentation("screenshot");
+    const screenshotDocumentation = await browser.documentation("screenshot");
     assert.match(screenshotDocumentation, /viewportId/);
     await tab.ax.write("both", { mode: "interactive" });
 
@@ -70,8 +70,8 @@ try {
     assert.equal(presented.images[0].origin, statePresentation.origin);
 
     console.log(JSON.stringify({
-      runtime: agent.identity.runtimeVersion,
-      browserGeneration: agent.identity.browserGeneration,
+      runtime: browser.identity.runtimeVersion,
+      browserGeneration: browser.identity.browserGeneration,
       documentationChars: observationDocumentation.length,
       observationId: statePresentation.observationId,
       screenshot: {
@@ -82,7 +82,7 @@ try {
       },
     }, null, 2));
   } finally {
-    await agent.disconnect();
+    await browser.disconnect();
   }
 } finally {
   await stopListeningDaemon(socketPath);

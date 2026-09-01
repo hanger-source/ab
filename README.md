@@ -53,29 +53,30 @@ npm install @hanger-source/ab@rc
 ```ts
 import { connect } from "@hanger-source/ab/agent";
 
-const agent = await connect();
+const browser = await connect();
 
 try {
-  const tabs = await agent.tabs.list();
-  const tab = tabs[0] ?? await agent.tabs.open("https://example.com");
+  const tabs = await browser.tabs.list();
+  const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
 
   await tab.ax.write("state", { mode: "interactive" });
   await tab.ax.click("e2", { write: "diff" });
+  await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 } finally {
-  await agent.disconnect();
+  await browser.disconnect();
 }
 ```
 
-`agent.disconnect()` 只释放当前 SDK client 拥有的 observer、CDPSession、ElementHandle、observation 等临时资源，不关闭 daemon、Chrome 或其他 client。页面只有在调用 `tab.close()` 时才关闭。
+`browser.disconnect()` 只释放当前 SDK client 拥有的 observer、CDPSession、ElementHandle、observation 等临时资源，不关闭 daemon、Chrome 或其他 client。页面只有在调用 `tab.close()` 时才关闭。
 
 ## Agent 操作面
 
 - 陌生页面先用 `ax.write("state")` 把 AX observation 喂给 Agent，再使用已展示 observation 的 ref；
-- 稳定、重复结构使用由 Rust 执行的 Playwright-style Locator；
+- 稳定、重复结构使用 `tab.playwright` 中由 Rust 执行的 Playwright-style Locator；
 - canvas、地图和远程桌面使用 screenshot + CUA，并绑定 viewport identity；
-- 页面专有计算使用函数式 `evaluate()`；
-- 浏览器机制诊断与未覆盖 domain 使用显式 `CDPSession`；
-- network、console、dialog、download、file chooser 和 init script 都是 client-owned Resource，监听必须在动作前建立。
+- 页面专有计算使用 `tab.dev.evaluate()`；
+- 浏览器机制诊断与未覆盖 domain 使用 `tab.dev.cdp()` 取得显式 `CDPSession`；
+- `tab.resources` 中的 network、console、dialog、download、file chooser 和 init script 都是 client-owned Resource，监听必须在动作前建立。
 
 这些入口不是自动 fallback 链。not found、stale、hit-test、dialog、transport 与 outcome unknown 必须保留各自错误语义，SDK 不自动重放副作用动作。
 

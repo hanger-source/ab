@@ -5,7 +5,7 @@ AB resources are client-owned server objects. They buffer and sequence browser e
 ## Network
 
 ```ts
-const resource = await tab.observeNetwork({
+const resource = await tab.resources.network({
   bodyRetentionBytes: 256 * 1024 * 1024,
   bodyMemoryBytes: 32 * 1024 * 1024,
   maxBodyBytes: 8 * 1024 * 1024,
@@ -29,7 +29,7 @@ Network event parameters preserve the corresponding CDP event payload. `response
 ## Console
 
 ```ts
-const resource = await tab.observeConsole();
+const resource = await tab.resources.console();
 const event = await resource.waitForMessage(predicate, options);
 ```
 
@@ -38,7 +38,7 @@ The stream includes `Runtime.consoleAPICalled`, `Runtime.exceptionThrown`, and `
 ## Dialogs
 
 ```ts
-const dialogs = await tab.watchDialogs();
+const dialogs = await tab.resources.dialogs();
 const opened = await dialogs.waitForDialog(options);
 await dialogs.accept(promptText?, options);
 // or await dialogs.dismiss(options)
@@ -49,13 +49,13 @@ Opening a dialog can pause page JavaScript. Open the watcher before the click th
 ## Downloads and file choosers
 
 ```ts
-const downloads = await tab.watchDownloads();
+const downloads = await tab.resources.downloads();
 const started = await downloads.waitForDownload(options);
 const completed = await downloads.waitForCompleted(options);
 const bytes = await completed.artifact?.read();
 await completed.artifact?.dispose();
 
-const choosers = await tab.watchFileChoosers();
+const choosers = await tab.resources.fileChoosers();
 const chooser = await choosers.waitForChooser(options);
 ```
 
@@ -64,7 +64,7 @@ const chooser = await choosers.waitForChooser(options);
 ## Init scripts
 
 ```ts
-const registration = await tab.addInitScript({
+const registration = await tab.resources.initScripts({
   name: "order-monitor",
   world: "isolated", // default; use "main" only when page globals must be patched
   frames: "all",     // or "top"
@@ -86,7 +86,7 @@ try {
   const changed = await registration.waitFor(
     event => event.method === "initScript.event" && event.params.event === "changed",
   );
-  await tab.navigate(url);
+  await tab.goto(url);
 } finally {
   await registration.dispose();
 }

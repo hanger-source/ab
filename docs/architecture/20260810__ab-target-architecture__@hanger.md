@@ -239,7 +239,7 @@ await tab.ax.write("screenshot", options?);
 await tab.ax.write("both", options?);
 ```
 
-`get()` 返回完整 typed object，既不向模型输出，也不推进展示基线。`write()` 通过注入的 `AgentPresenter` 把结果真正交给当前 Agent：state 写入有来源和 observation 边界的文本；screenshot 交给宿主图片输出；both 同时呈现二者。普通页面文本、AX 名称、console、network body 都放在不可信内容边界内，不能被当作 Skill 指令。
+`get()` 返回完整 typed object，既不向模型输出，也不推进展示基线。`write()` 通过注入的 `Presenter` 把结果真正交给当前 Agent：state 写入有来源和 observation 边界的文本；screenshot 交给宿主图片输出；both 同时呈现二者。普通页面文本、AX 名称、console、network body 都放在不可信内容边界内，不能被当作 Skill 指令。
 
 `write("state")` 和 `write("both")` 成功呈现后，把该 state 的 observation id 记为当前 Agent session + tab 的 `lastPresentedObservationId`。`write("screenshot")` 不改变 AX 基线；`get()` 永远不改变基线。展示失败时不推进基线，避免 Agent 对一个自己没有看到的 state 使用短 ref。
 
@@ -282,8 +282,8 @@ Core 的 `snapshot()`/组合 observation 是 AX 采集和 ref identity 的显式
 稳定、重复的结构使用 Locator：
 
 ```ts
-await tab.getByRole("button", { name: "提交" }).click();
-await tab.getByLabel("邮箱").fill("a@example.com");
+await tab.playwright.getByRole("button", { name: "提交" }).click();
+await tab.playwright.getByLabel("邮箱").fill("a@example.com");
 ```
 
 TypeScript Locator 保存不可变 Query AST，Rust 在每次读取或动作时针对当前 document 执行。第一版 Query AST 包含：
@@ -327,12 +327,12 @@ await tab.cua.click({ x, y, viewportId: shot.viewportId });
 ### 6.7 evaluate 与 raw CDP
 
 ```ts
-const title = await tab.evaluate(() => document.title);
-const session = await tab.cdp();
+const title = await tab.dev.evaluate(() => document.title);
+const session = await tab.dev.cdp();
 await session.send("Performance.getMetrics");
 ```
 
-函数式 evaluate 使用函数源码与结构化参数，支持 Promise、完整值与页面异常。raw expression 只经 CDPSession 使用。`tab.cdp()` 绑定 root session，`frame.cdp()` 绑定该 frame 当前所属的 same-process/OOPIF session；对象由 server ResourceRegistry 持有，`Domain.enable/disable` 与高层 observer 共用 session + domain lease，dispose/client disconnect/target close 释放其全部 lease。Skill 不用 evaluate + `querySelector` 代替普通观察和交互；它只在需要页面专有数据、非 UI 计算或诊断时使用。
+函数式 evaluate 使用函数源码与结构化参数，支持 Promise、完整值与页面异常。raw expression 只经 CDPSession 使用。Agent `tab.dev.cdp()` 绑定 root session；Core `tab.cdp()` 与 `frame.cdp()` 继续绑定各自的 same-process/OOPIF session。对象由 server ResourceRegistry 持有，`Domain.enable/disable` 与高层 observer 共用 session + domain lease，dispose/client disconnect/target close 释放其全部 lease。Skill 不用 evaluate + `querySelector` 代替普通观察和交互；它只在需要页面专有数据、非 UI 计算或诊断时使用。
 
 ### 6.8 Core 组合观察
 
@@ -551,7 +551,7 @@ sdk/ts/
   tsconfig.json
   src/
     connect.ts
-    agent/                         Presenter, AgentBrowser/Tab, AX get/write/ref actions
+    agent/                         Browser/Tab namespaces, Presenter, AX get/write/ref actions
     runtime/                       native binary, daemon discovery/auto-start, client session
     transport/
     errors/

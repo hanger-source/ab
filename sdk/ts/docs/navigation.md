@@ -5,7 +5,7 @@ Browser lifecycle readiness and application readiness are different facts. `domc
 ## Navigate deliberately
 
 ```js
-await tab.navigate("https://example.com/orders", {
+await tab.goto("https://example.com/orders", {
   waitUntil: "domcontentloaded",
   timeoutMs: 30_000,
 });
@@ -21,8 +21,8 @@ Use `waitUntil: "none"` only when another explicit signal owns readiness. After 
 For stable DOM facts:
 
 ```js
-await tab.waitFor({ text: "Ready", state: "visible", timeoutMs: 20_000 });
-await tab.getByRole("heading", { name: "Ready", exact: true }).waitFor({
+await tab.playwright.waitFor({ text: "Ready", state: "visible", timeoutMs: 20_000 });
+await tab.playwright.getByRole("heading", { name: "Ready", exact: true }).waitFor({
   state: "visible",
   timeoutMs: 20_000,
 });
@@ -48,12 +48,12 @@ If the click can open a dialog, download, file chooser, or new tab, open the mat
 
 ## New tabs and popups
 
-AB exposes target discovery through `agent.tabs.list()` rather than an implicit popup object:
+AB exposes target discovery through `browser.tabs.list()` rather than an implicit popup object:
 
 ```js
-const before = new Set((await agent.tabs.list()).map(t => t.id));
+const before = new Set((await browser.tabs.list()).map(t => t.id));
 await trigger.click();
-const after = await agent.tabs.list();
+const after = await browser.tabs.list();
 const opened = after.filter(t => !before.has(t.id));
 ```
 

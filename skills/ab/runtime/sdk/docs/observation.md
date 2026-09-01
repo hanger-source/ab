@@ -14,7 +14,7 @@ await state.ref("e4").click({ observe: "diff" });
 
 There is no implicit latest AX state in Rust, no `ax.click(index)`, and no ref relocation. A ref means one observation, frame, document generation, and backend node.
 
-`frames` is either `"all"` or `{ root: frameId }`. A root scope captures that exact frame and its descendant frame subtree; it excludes siblings, ancestors, and other branches. Obtain current identities from `tab.frames()` and never use an array index as a frame scope. A diff must use the same frame root as its baseline.
+`frames` is either `"all"` or `{ root: frameId }`. A root scope captures that exact frame and its descendant frame subtree; it excludes siblings, ancestors, and other branches. Obtain current identities from `tab.dev.frames()` and never use an array index as a frame scope. A diff must use the same frame root as its baseline.
 
 ## Completeness
 
@@ -70,7 +70,7 @@ Presentation must succeed before the baseline advances. If the Presenter throws,
 ## Atomic observation ownership
 
 ```js
-await agent.documentation("screenshot");
+await browser.documentation("screenshot");
 const page = await tab.ax.get("both");
 try {
   page.state?.text;

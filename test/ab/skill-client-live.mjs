@@ -5,7 +5,7 @@ const { connect } = await import(clientPath);
 
 let taskTab;
 const presented = [];
-const agent = await connect({
+const browser = await connect({
     presenter: {
       presentText(value) {
         presented.push(value);
@@ -16,8 +16,8 @@ const agent = await connect({
     },
 });
 try {
-    assert.equal(agent.core, undefined);
-    taskTab = await agent.tabs.open("data:text/html," + encodeURIComponent(`
+    assert.equal(browser.core, undefined);
+    taskTab = await browser.tabs.open("data:text/html," + encodeURIComponent(`
       <title>AB Skill client</title>
       <label>Email <input aria-label="Email"></label>
       <button onclick="result.textContent = 'Saved: ' + document.querySelector('input').value">Continue</button>
@@ -25,34 +25,47 @@ try {
       <output id="result"></output>
     `));
     assert.equal(taskTab.core, undefined);
+    assert.deepEqual(
+      Object.getOwnPropertyNames(taskTab).sort(),
+      ["ax", "cua", "dev", "playwright", "resources"],
+    );
+    assert.deepEqual(
+      ["navigate", "locator", "getByRole", "evaluate", "frames", "cdp", "observeNetwork"]
+        .filter((member) => taskTab[member] !== undefined),
+      [],
+    );
+    assert.equal(typeof taskTab.goto, "function");
+    assert.equal(typeof taskTab.playwright.getByRole, "function");
+    assert.equal(typeof taskTab.resources.network, "function");
+    assert.equal(typeof taskTab.dev.evaluate, "function");
 
     assert.throws(
-      () => taskTab.evaluate(() => document.title),
+      () => taskTab.dev.evaluate(() => document.title),
       (error) => error?.kind === "documentation_required"
         && error?.details?.topic === "evaluate",
     );
-    await agent.documentation("evaluate");
-    const documentTitle = await taskTab.evaluate(() => document.title);
+    await browser.documentation("evaluate");
+    const documentTitle = await taskTab.dev.evaluate(() => document.title);
     assert.equal(documentTitle, "AB Skill client");
 
     await taskTab.ax.write("state", { mode: "interactive" });
     const initialAxPresentations = presented.filter((value) => value.kind === "ax").length;
-    await taskTab.getByLabel("Email").fill("agent@example.com");
+    await taskTab.playwright.getByLabel("Email").fill("agent@example.com");
     const afterFillPresentations = presented.filter((value) => value.kind === "ax");
     assert.equal(afterFillPresentations.length, initialAxPresentations + 1);
     assert.match(afterFillPresentations.at(-1).text, /Email/);
-    await taskTab.getByRole("button", { name: "Continue", exact: true }).click();
+    await taskTab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
     const afterClickPresentations = presented.filter((value) => value.kind === "ax");
     assert.equal(afterClickPresentations.length, initialAxPresentations + 2);
     assert.match(afterClickPresentations.at(-1).text, /Saved: agent@example.com/);
     assert.notEqual(afterClickPresentations.at(-1).observationId, afterFillPresentations.at(-1).observationId);
     assert.equal(
-      await taskTab.getByText("Saved: agent@example.com", { exact: true }).textContent(),
+      await taskTab.playwright.getByText("Saved: agent@example.com", { exact: true }).textContent(),
       "Saved: agent@example.com",
     );
 
     const beforeSilentPresentations = presented.filter((value) => value.kind === "ax").length;
-    const silentResult = await taskTab.getByRole("button", {
+    const silentResult = await taskTab.playwright.getByRole("button", {
       name: "Silent action",
       exact: true,
     }).click({ write: "none" });
@@ -63,12 +76,12 @@ try {
       beforeSilentPresentations,
     );
     assert.equal(
-      await taskTab.getByText("Silent action completed", { exact: true }).textContent(),
+      await taskTab.playwright.getByText("Silent action completed", { exact: true }).textContent(),
       "Silent action completed",
     );
 
     const beforeWaitPresentations = presented.filter((value) => value.kind === "ax").length;
-    await taskTab.evaluate(() => {
+    await taskTab.dev.evaluate(() => {
       setTimeout(() => {
         const listbox = document.createElement("div");
         listbox.setAttribute("role", "listbox");
@@ -79,7 +92,7 @@ try {
         document.body.append(listbox);
       }, 150);
     });
-    await taskTab.getByRole("option", { name: "Delayed semantic option", exact: true }).waitFor({
+    await taskTab.playwright.getByRole("option", { name: "Delayed semantic option", exact: true }).waitFor({
       state: "visible",
       timeoutMs: 2_000,
     });
@@ -87,7 +100,7 @@ try {
     assert.equal(afterWaitPresentations.length, beforeWaitPresentations + 1);
     assert.match(afterWaitPresentations.at(-1).text, /Delayed semantic option/);
 
-    await agent.documentation("screenshot");
+    await browser.documentation("screenshot");
     const screenshot = await taskTab.ax.get("screenshot");
     try {
       assert.equal(screenshot.id, screenshot.artifact.id);
@@ -106,7 +119,7 @@ try {
 
     console.log(JSON.stringify({
       clientPath,
-      daemonId: agent.identity.daemonId,
+      daemonId: browser.identity.daemonId,
       documentTitle,
       result: "Saved: agent@example.com",
       agentLocatorPresentations: afterClickPresentations.length - initialAxPresentations,
@@ -114,10 +127,11 @@ try {
       agentLocatorWaitPresentation: "Delayed semantic option",
       documentationGate: "evaluate",
       screenshotMetadata: "top-level-and-artifact-aligned",
+      tabSurface: Object.getOwnPropertyNames(taskTab).sort(),
     }, null, 2));
 } finally {
   await taskTab?.close().catch(() => undefined);
-  await agent.disconnect();
+  await browser.disconnect();
 }
 
 function requiredEnv(name) {

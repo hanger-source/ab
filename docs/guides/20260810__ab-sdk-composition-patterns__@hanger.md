@@ -6,8 +6,8 @@ AB 不提供 runner 或管理 CLI。交互式 Agent 在宿主管理的持久 Nod
 
 ```js
 const { connect } = await import("@hanger-source/ab/agent");
-const agent = await connect();
-const tabs = await agent.tabs.list();
+const browser = await connect();
+const tabs = await browser.tabs.list();
 ```
 
 第一次调用会自动拉起隐藏 daemon 与专用 Chrome；后续 Node 任务连接同一个运行现场。旧任务的 ref、observer 和 handle 不跨 client 复用，新任务应重新取得 Tab 并观察当前 document。
@@ -15,7 +15,7 @@ const tabs = await agent.tabs.list();
 ## 陌生页面先观察
 
 ```js
-const tab = tabs[0] ?? await agent.tabs.open("https://example.com");
+const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
 await tab.ax.write("state", { mode: "interactive", maxChars: 24_000 });
 await tab.ax.click("e4", { write: "diff" });
 ```
@@ -25,8 +25,8 @@ await tab.ax.click("e4", { write: "diff" });
 ## 稳定流程使用 Locator
 
 ```js
-await tab.getByLabel("邮箱").fill("user@example.com");
-await tab.getByRole("button", { name: "登录" }).click({ observe: "diff" });
+await tab.playwright.getByLabel("邮箱").fill("user@example.com");
+await tab.playwright.getByRole("button", { name: "登录" }).click({ write: "diff" });
 await tab.ax.write("state");
 ```
 
@@ -35,14 +35,15 @@ Locator 保存不可变 Query AST，由 Rust 每次针对当前 document 重新�
 ## 监听先于动作
 
 ```js
-const network = await tab.observeNetwork();
+await browser.documentation("network");
+const network = await tab.resources.network();
 
 try {
   const responsePromise = network.waitForResponse(
     event => event.url.includes("/api/orders"),
   );
 
-  await tab.getByRole("button", { name: "查询订单" }).click();
+  await tab.playwright.getByRole("button", { name: "查询订单" }).click();
   const response = await responsePromise;
   console.log(await network.responseBody(response));
 } finally {
@@ -69,9 +70,11 @@ await tab.cua.click({
 ## 底层能力保持显式
 
 ```js
-const data = await tab.evaluate(() => globalThis.__APP_STATE__);
+await browser.documentation("evaluate");
+await browser.documentation("cdp");
+const data = await tab.dev.evaluate(() => globalThis.__APP_STATE__);
 
-const session = await tab.cdp();
+const session = await tab.dev.cdp();
 try {
   const metrics = await session.send("Performance.getMetrics");
   console.log(data, metrics);
@@ -85,7 +88,7 @@ try {
 ## 结束当前 client
 
 ```js
-await agent.disconnect();
+await browser.disconnect();
 ```
 
 disconnect 只释放当前 client resource。daemon、Chrome、profile 与 tab 继续保留，供下一次独立任务连接。

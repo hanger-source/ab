@@ -59,7 +59,7 @@ The default Presenter selects its public host channel at connection time:
 
 - inside the managed Node REPL, AX/documentation text uses `nodeRepl.write()` and verified screenshot bytes use `nodeRepl.emitImage()`, producing standard MCP text/image content blocks;
 - in an ordinary Node process, text and screenshot artifact metadata go to stdout, and the Agent opens the verified path with its host image viewer;
-- a caller may still provide an explicit typed `AgentPresenter` to `connect()`.
+- a caller may still provide an explicit typed `Presenter` to `connect()`.
 
 AB does not depend on Codex Browser's private response writer. Codex's built-in Node REPL and the open-source Qwen Node REPL are interchangeable only at this public content/session contract; their implementation, Tool names and release identity remain host concerns.
 
@@ -86,7 +86,7 @@ The manifest, packaged SDK, and native build share one protocol/build identity. 
 
 ```js
 const agent = await connect({ timeoutMs: 30_000 });
-agent.identity;
+browser.identity;
 // clientId, daemonId, browserGeneration, chrome.source, chrome.pid
 ```
 
@@ -103,7 +103,7 @@ Call the persistent JavaScript Tool repeatedly. The first cell imports the versi
 ```js
 const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
 const agent = await connect();
-let tabs = await agent.tabs.list();
+let tabs = await browser.tabs.list();
 nodeRepl.write(tabs);
 ```
 

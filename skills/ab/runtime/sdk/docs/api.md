@@ -8,16 +8,16 @@ import { connect } from "@hanger-source/ab/agent";
 connect(options?: {
   timeoutMs?: number;
   signal?: AbortSignal;
-  presenter?: AgentPresenter;
-}): Promise<AgentBrowser>
+  presenter?: Presenter;
+}): Promise<Browser>
 
-agent.identity
-agent.connected
-agent.diagnostics.snapshot({ traceId?, requestId? })
-agent.diagnostics.onTrace(listener): () => void
-agent.diagnostics.clear(): void
-agent.disconnect(): Promise<void>
-agent.documentation(topic?:
+browser.identity
+browser.connected
+browser.diagnostics.snapshot({ traceId?, requestId? })
+browser.diagnostics.onTrace(listener): () => void
+browser.diagnostics.clear(): void
+browser.disconnect(): Promise<void>
+browser.documentation(topic?:
   | "core" | "bootstrap" | "tabs" | "observation" | "actions"
   | "screenshot" | "frames" | "evaluate" | "network"
   | "console-dialogs" | "downloads" | "init-scripts"
@@ -53,7 +53,7 @@ error.details
 `retryable` only reports whether mechanically issuing the request again is safe; it never causes an automatic retry. In particular, `outcome_unknown` is not retryable because a side effect may already have happened.
 
 ```ts
-const snapshot = agent.diagnostics.snapshot({ traceId: error.context?.traceId });
+const snapshot = browser.diagnostics.snapshot({ traceId: error.context?.traceId });
 snapshot.events     // ordered dispatched/settled stages
 snapshot.complete   // false if the bounded local history evicted events
 snapshot.dropped
@@ -69,12 +69,12 @@ browser.tabs.get(targetId, options?)
 browser.tabs.open(url?, { waitUntil?, timeoutMs?, signal? })
 
 tab.refresh(options?)
-tab.navigate(url, { waitUntil?, timeoutMs?, signal? })
+tab.goto(url, { waitUntil?, timeoutMs?, signal? })
 tab.activate(options?)
 tab.reload(options?)
 tab.goBack(options?)
 tab.goForward(options?)
-tab.waitFor({ selector?, text?, state?: "attached" | "detached" | "visible" | "hidden", timeoutMs?, signal? })
+tab.playwright.waitFor({ selector?, text?, state?: "attached" | "detached" | "visible" | "hidden", timeoutMs?, signal? })
 tab.close(options?)
 ```
 
@@ -113,7 +113,7 @@ tab.ax.scrollIntoView(refId, options?)
 ## Core AX state and refs
 
 ```ts
-tab.ax.snapshot({
+coreTab.ax.snapshot({
   mode?: "interactive" | "full",
   surface?: "active" | "document",
   frames?: "all" | { root: string },
@@ -223,7 +223,7 @@ The result reports browser mechanics, not business success. `fileChooser.complet
 ## Core atomic page observation
 
 ```ts
-tab.observe({
+coreTab.observe({
   ax?: boolean | SnapshotOptions,
   screenshot?: boolean,
   fullPage?: boolean,
@@ -240,20 +240,20 @@ When AX and screenshot are both requested, Rust captures and validates them as o
 
 ## Locators
 
-`@hanger-source/ab/agent` returns `AgentLocator` from every tab semantic builder. It has the same immutable composition and read methods as Core Locator. Mutation options use `write?: "diff" | "state" | "none"`; the default is `"diff"` for state-changing operations and `"none"` for hover/focus/wheel/scroll. Agent actions deliberately do not expose Core `observe` or `baseline`: the Agent owns the exact presented observation, and runtime JavaScript that passes either field fails before dispatch. `write:"diff"` presents and adopts the ActionResult's existing observation without another capture. Agent `waitFor()` presents a fresh full state after the condition succeeds by default; use `write:"none"` for a pure wait. Core Locator waits never present.
+`@hanger-source/ab/agent` returns `Locator` from every `tab.playwright` semantic builder. It has the same immutable composition and read methods as Core Locator. Mutation options use `write?: "diff" | "state" | "none"`; the default is `"diff"` for state-changing operations and `"none"` for hover/focus/wheel/scroll. Agent actions deliberately do not expose Core `observe` or `baseline`: the Agent owns the exact presented observation, and runtime JavaScript that passes either field fails before dispatch. `write:"diff"` presents and adopts the ActionResult's existing observation without another capture. Agent `Locator.waitFor()` presents a fresh full state after the condition succeeds by default; use `write:"none"` for a pure wait. Core Locator waits never present.
 
 ```ts
-tab.mainFrame(options?)
-tab.frames(options?)
+tab.dev.mainFrame(options?)
+tab.dev.frames(options?)
 
-tab.locator(css)
-tab.getByRole(role, { name?, exact? })
-tab.getByText(text, { exact? })
-tab.getByLabel(label, { exact? })
-tab.getByPlaceholder(text, { exact? })
-tab.getByAltText(text, { exact? })
-tab.getByTitle(text, { exact? })
-tab.getByTestId(value)
+tab.playwright.locator(css)
+tab.playwright.getByRole(role, { name?, exact? })
+tab.playwright.getByText(text, { exact? })
+tab.playwright.getByLabel(label, { exact? })
+tab.playwright.getByPlaceholder(text, { exact? })
+tab.playwright.getByAltText(text, { exact? })
+tab.playwright.getByTitle(text, { exact? })
+tab.playwright.getByTestId(value)
 
 frame.locator(css)
 frame.getByRole(role, { name?, exact? })
@@ -274,9 +274,9 @@ locator.waitFor({
   state?: "attached" | "detached" | "visible" | "hidden",
   timeoutMs?,
   signal?,
-  // AgentLocator only:
+  // Locator only:
   write?: "state" | "none",
-  observation?: AgentWriteOptions,
+  observation?: WriteOptions,
 })
 locator.elementHandle(options?)
 locator.click(options?)
@@ -288,7 +288,7 @@ locator.focus(options?)
 locator.scrollIntoView(options?)
 locator.fill(value, options?)
 locator.type(text, options?)
-locator.fillAndSelectSuggestion(query, suggestionText, { expectedValue?, exact?, suggestionExact?, observe?/write?, observation?, timeoutMs?, signal? })
+locator.fillAndSelectSuggestion(query, suggestionText, { expectedValue?, exact?, suggestionExact?, write?, observation?, timeoutMs?, signal? })
 locator.press(key, options?)
 locator.check(options?)
 locator.uncheck(options?)
@@ -312,7 +312,7 @@ Locators are immutable query objects. A builder call does not touch the browser.
 
 `fill()` and `type()` return `ActionResult<TextInputActionData>`. Its `data.field` contains `requestedText`, settled `inputValue`, `popupBacked`, `signals`, and `next: "selectSuggestion" | "none"`. The same typed data is returned by Locator, AXRef, and ElementHandle input actions.
 
-`fillAndSelectSuggestion()` returns `{ input, selection, suggestion, committedValue }`. It resolves `suggestionText` only among actionable refs newly introduced after the fill; `suggestion` preserves the chosen observation/ref/role/name identity. Core Locator keeps explicit `observe`; AgentLocator uses `write` and presents only the final selection result.
+`fillAndSelectSuggestion()` returns `{ input, selection, suggestion, committedValue }`. It resolves `suggestionText` only among actionable refs newly introduced after the fill; `suggestion` preserves the chosen observation/ref/role/name identity. Core Locator keeps explicit `observe`; Locator uses `write` and presents only the final selection result.
 
 ## Element handles
 
@@ -391,26 +391,26 @@ tab.cua.drag({ from: { x, y }, to: { x, y }, viewportId, observe?, timeoutMs?, s
 ## Frames, realms, evaluate, and CDP
 
 ```ts
-tab.frames(options?): Promise<Frame[]>
-tab.realms(options?): Promise<Realm[]>
-tab.evaluate(fn, ...args)
+tab.dev.frames(options?): Promise<Frame[]>
+tab.dev.realms(options?): Promise<Realm[]>
+tab.dev.evaluate(fn, ...args)
 
 frame.evaluate(fn, ...args)
 realm.evaluate(fn, ...args)
 
-const cdp = await tab.cdp();
+const cdp = await tab.dev.cdp();
 await cdp.send(method, params?, options?);
 await cdp.dispose(options?);
 ```
 
 `Realm` retains `id`, `sessionId`, `executionContextId`, and `frameId` as one captured identity. `realm.evaluate()` hard-fails with `stale_realm` when that identity no longer resolves; execution-context ids are not globally unique across CDP sessions.
 
-There is no generic engine-command escape hatch. Use typed AB operations; use an explicit `CDPSession` only for browser-protocol diagnostics or a primitive that AB has not promoted. `tab.cdp()` binds the root session; `frame.cdp()` binds the session that owns that captured frame. CDP sessions and their domain leases are released by `dispose()`, client disconnect, or target close.
+There is no generic engine-command escape hatch. Use typed AB operations; use an explicit `CDPSession` only for browser-protocol diagnostics or a primitive that AB has not promoted. Agent `tab.dev.cdp()` binds the root session; Core `tab.cdp()` and `frame.cdp()` retain their explicit flat API. CDP sessions and their domain leases are released by `dispose()`, client disconnect, or target close.
 
 ## Resources and init scripts
 
 ```ts
-tab.observeNetwork({
+tab.resources.network({
   bodyRetentionBytes?,
   bodyMemoryBytes?,
   maxBodyBytes?,
@@ -420,12 +420,12 @@ tab.observeNetwork({
   timeoutMs?,
   signal?,
 }?): Promise<NetworkObserver>
-tab.observeConsole(options?): Promise<ConsoleObserver>
-tab.watchDialogs(options?): Promise<DialogWatcher>
-tab.watchDownloads(options?): Promise<DownloadWatcher>
-tab.watchFileChoosers(options?): Promise<FileChooserWatcher>
+tab.resources.console(options?): Promise<ConsoleObserver>
+tab.resources.dialogs(options?): Promise<DialogWatcher>
+tab.resources.downloads(options?): Promise<DownloadWatcher>
+tab.resources.fileChoosers(options?): Promise<FileChooserWatcher>
 
-tab.addInitScript({
+tab.resources.initScripts({
   name: string,
   source: string,
   world?: "main" | "isolated",
@@ -443,3 +443,5 @@ registration.dispose(options?)
 ```
 
 Every resource is owned by the current SDK client and buffered in Rust with sequence and completeness state. An init-script instance is scoped to one `sessionId + executionContextId + documentGeneration`; commands never retarget an old instance after navigation or frame detach.
+
+Core callers use the corresponding flat methods `coreTab.observeNetwork()`, `observeConsole()`, `watchDialogs()`, `watchDownloads()`, `watchFileChoosers()`, and `addInitScript()`. Agent namespaces change discoverability, not Rust resource ownership or behavior.
