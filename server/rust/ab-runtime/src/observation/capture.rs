@@ -624,9 +624,9 @@ fn capture_session_ids(context: &TargetContext) -> Vec<String> {
         .frames
         .iter()
         .map(|frame| frame.session_id.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
+        .collect::<HashSet<_>>();
+    sessions.insert(context.root_session_id.clone());
+    let mut sessions = sessions.into_iter().collect::<Vec<_>>();
     sessions.sort();
     sessions
 }

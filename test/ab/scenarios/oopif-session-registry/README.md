@@ -18,6 +18,7 @@ This scenario exercises a top document with both same-process and out-of-process
 - The registry exposes the root and all four child frames with the correct parent relationships.
 - A frame detach event may remove only a frame currently owned by the same CDP session; a stale parent-session swap event cannot delete the child session's live frame.
 - Frame, realm, Locator, AX ref, CDP, Resource, and init-script identities agree on their owning session and document.
+- Every observation captures the tab's authoritative root CDP session even while frame ownership is converging during OOPIF attachment; document-surface identity never depends on the root frame already appearing in a derived frame-session set.
 - Closing or detaching a child session closes its resources without damaging the root target or sibling sessions.
 
 The page is a deterministic local topology. The runtime fix uses existing session ownership; it does not special-case hostnames, frame URLs, or this fixture's labels.
