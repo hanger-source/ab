@@ -39,7 +39,7 @@
 | 544 | source-aware | 1.0 | 1340 entries；一次 PageBuilder iframe body 抓取失败，因此 `complete: false` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/544/` | 复合编辑器的 child frame 输入与保存成立 |
 | 549 | source-aware | 1.0 | 1837 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware-r2/549/` | 新属性与唯一 `XXXL + Green` 变体均由官方网络 evaluator 接受 |
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
-| 771 | source-aware | 待执行 | — | — | — |
+| 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
 | 610 | source-aware | 待执行 | — | — | — |
 | 733 | source-aware | 待执行 | — | — | — |
 
@@ -78,6 +78,8 @@ coordinator 首次收到的 Agent response 被误写成 `task_type: "action"`，
 
 Rust daemon、Chrome、tab 与页面 mutation 均在重连后保留，因此持久生命周期成立；但 Agent API 的 deadline 没有稳定收束为可恢复的普通调用失败。这个问题属于 SDK/Runtime 超时边界，不属于 549，也不能用延长宿主 timeout 或题目专用重试掩盖。
 
+771 再次复现同一边界：第一次 `Tab.goto()` 在页面已经导航到评论 352 后仍耗尽宿主 30 秒并重置 kernel；重新连接后读取到目标 URL，因而没有重放导航。后续相同商品后台中的导航均在约 2 秒返回，说明它不是固定页面慢，而是调用完成与托管会话 deadline 偶发失配。
+
 ### Observation origin 滞后
 
 同一 `Tab` 从 Dashboard 导航到 Product Attributes 与属性编辑页后，若不重连，Presenter 仍多次把 observation origin 标成 Dashboard URL；重连后 origin 才变成实际商品页 URL。操作 target 没有漂移，但模型可见的页面身份滞后，违背 observation identity 应来自当前 document 的要求。
@@ -98,6 +100,6 @@ Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Na
 
 ## 尚未形成的结论
 
-- source-aware 尚未完成 6/6；目前确认 544、549、769 三题通过。
+- source-aware 尚未完成 6/6；目前确认 544、549、769、771 四题通过。
 - fresh Skill-only 尚未重跑；不能用旧 4/6 代表候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
