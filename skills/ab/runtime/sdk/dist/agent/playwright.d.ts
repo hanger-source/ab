@@ -94,7 +94,10 @@ export declare class Locator {
     dragTo(target: Locator, options?: LocatorActionOptions): Promise<LocatorResult>;
     textContent(options?: OperationOptions): Promise<string>;
     innerText(options?: OperationOptions): Promise<string>;
-    domInvoke<T = unknown>(method: string, args?: unknown[], options?: LocatorActionOptions): Promise<LocatorResult<{
+    domInvoke<T = unknown>(method: string, options?: LocatorActionOptions): Promise<LocatorResult<{
+        value?: T;
+    }>>;
+    domInvoke<T = unknown>(method: string, args: unknown[], options?: LocatorActionOptions): Promise<LocatorResult<{
         value?: T;
     }>>;
     screenshot(options?: OperationOptions): Promise<Screenshot>;

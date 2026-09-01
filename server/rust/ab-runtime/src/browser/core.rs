@@ -155,6 +155,7 @@ struct ActionTransaction {
     before_url: String,
     before_generation: String,
     events: broadcast::Receiver<CdpEvent>,
+    deadline: Instant,
 }
 
 impl BrowserCore {
@@ -200,7 +201,8 @@ impl BrowserCore {
         let session = self.owner.sessions().open_tab("about:blank").await?;
         let target_id = session.target_id.clone();
         if url != "about:blank" {
-            if let Err(error) = self.navigate(&target_id, url, wait_until, timeout_ms).await {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            if let Err(error) = self.navigate(&target_id, url, wait_until, deadline).await {
                 let _ = self.owner.close_target(&target_id).await;
                 return Err(error);
             }
@@ -248,18 +250,24 @@ impl BrowserCore {
         target_id: &str,
         url: &str,
         wait_until: &str,
-        timeout_ms: u64,
+        deadline: Instant,
     ) -> AbResult<Value> {
         let _lane = self.owner.lock_target(target_id).await?;
         let context = self.context(target_id).await?;
+        let before_url = context.root_frame.url.clone();
+        let before_generation = context.root_frame.document_generation.clone();
         let mut events = context.client.subscribe();
+        let command_timeout = deadline.saturating_duration_since(Instant::now());
+        if command_timeout.is_zero() {
+            return Err(navigation_deadline_error(wait_until));
+        }
         let result = context
             .client
             .send_command_with_timeout(
                 "Page.navigate",
                 Some(json!({ "url": url })),
                 Some(&context.root_session_id),
-                Duration::from_millis(timeout_ms),
+                command_timeout,
             )
             .await
             .map_err(|message| browser_error("navigate", message))?;
@@ -278,31 +286,53 @@ impl BrowserCore {
                     ))
                 }
             };
-            timeout(Duration::from_millis(timeout_ms), async {
-                loop {
-                    match events.recv().await {
-                        Ok(event)
-                            if event.method == expected
-                                && event.session_id.as_deref()
-                                    == Some(&context.root_session_id) =>
-                        {
-                            return Ok(())
-                        }
-                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => {
-                            return Err(browser_error("navigate.events", "CDP event stream closed"))
-                        }
+            let expected_loader = result.get("loaderId").and_then(Value::as_str);
+            let mut committed = expected_loader.is_none();
+            loop {
+                if !committed {
+                    if let Ok(current) = self.context(target_id).await {
+                        committed = current.root_frame.document_generation != before_generation
+                            || current.root_frame.url != before_url;
                     }
                 }
-            })
-            .await
-            .map_err(|_| {
-                AbError::new(
-                    "timeout",
-                    "tab.navigate.wait",
-                    format!("{wait_until} did not occur within {timeout_ms}ms"),
-                )
-            })??;
+                if committed
+                    && document_ready_state(&context, deadline)
+                        .await
+                        .is_some_and(|state| lifecycle_state_reached(wait_until, &state))
+                {
+                    break;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(navigation_deadline_error(wait_until));
+                }
+                match timeout(remaining.min(Duration::from_millis(50)), events.recv()).await {
+                    Ok(Ok(event))
+                        if event.session_id.as_deref() == Some(&context.root_session_id) =>
+                    {
+                        if event.method == "Page.frameNavigated"
+                            && event.params.pointer("/frame/id").and_then(Value::as_str)
+                                == Some(context.root_frame.id.as_str())
+                            && expected_loader.is_none_or(|loader| {
+                                event
+                                    .params
+                                    .pointer("/frame/loaderId")
+                                    .and_then(Value::as_str)
+                                    == Some(loader)
+                            })
+                        {
+                            committed = true;
+                        }
+                        if committed && event.method == expected {
+                            break;
+                        }
+                    }
+                    Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) | Err(_) => {}
+                    Ok(Err(broadcast::error::RecvError::Closed)) => {
+                        return Err(browser_error("navigate.events", "CDP event stream closed"))
+                    }
+                }
+            }
         }
         Ok(result)
     }
@@ -325,6 +355,7 @@ impl BrowserCore {
         client_id: &str,
         target_id: &str,
         params: &Value,
+        deadline: Instant,
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
         let mut lane = self.owner.lock_target(target_id).await?;
@@ -401,7 +432,9 @@ impl BrowserCore {
             &context.root_frame.document_generation,
             coordinate,
         );
-        let transaction = self.begin_action(&context, operation, identity).await?;
+        let transaction = self
+            .begin_action(&context, operation, identity, deadline)
+            .await?;
         dispatch_marker.mark_started();
         let dispatch = if operation == "click" {
             let click = interaction::click_at(
@@ -640,6 +673,7 @@ impl BrowserCore {
         context: &TargetContext,
         action: &str,
         target: ActionTargetIdentity,
+        deadline: Instant,
     ) -> AbResult<ActionTransaction> {
         let id = Uuid::new_v4().to_string();
         let events = context.sessions.subscribe_browser_events();
@@ -661,6 +695,7 @@ impl BrowserCore {
             before_url: frame.url.clone(),
             before_generation: frame.document_generation.clone(),
             events,
+            deadline,
         })
     }
 
@@ -686,6 +721,7 @@ impl BrowserCore {
         observation_options: Option<&SnapshotOptions>,
     ) -> AbResult<ActionResult> {
         let target_id = transaction.target.target_id.clone();
+        let deadline = transaction.deadline;
         let dialog_opened = match self
             .synchronize_dialog_after_action(&target_id, &data)
             .await
@@ -696,8 +732,13 @@ impl BrowserCore {
                 return Err(error);
             }
         };
-        let file_chooser =
-            collect_file_chooser(self.owner.sessions(), &target_id, &mut transaction.events).await;
+        let file_chooser = collect_file_chooser(
+            self.owner.sessions(),
+            &target_id,
+            &mut transaction.events,
+            deadline,
+        )
+        .await;
         self.owner
             .sessions()
             .release_feature(&target_id, "fileChooser", &transaction.id)
@@ -716,33 +757,52 @@ impl BrowserCore {
         let after_generation = after_frame
             .map(|frame| frame.document_generation.clone())
             .unwrap_or_else(|| transaction.before_generation.clone());
-        let (observation, observation_outcome) =
-            if observation_options.is_some() && !dialog_blocking {
-                let capture = async {
-                    let after_context = self.context(&target_id).await?;
-                    let mut options = observation_options.expect("checked above").clone();
-                    options.diff_from = baseline.map(|record| record.output.id.clone());
-                    let record = observation_engine::capture(
-                        &after_context,
-                        client_id,
-                        Uuid::new_v4().to_string(),
-                        self.observations.next_revision(&target_id).await,
-                        &options,
-                        baseline,
-                    )
-                    .await?;
-                    self.observations.insert(record).await
-                }
-                .await;
-                match capture {
-                    Ok(observation) => (Some(observation), ActionObservationOutcome::completed()),
-                    Err(error) => (None, ActionObservationOutcome::failed(error)),
-                }
-            } else if observation_options.is_some() {
-                (None, ActionObservationOutcome::skipped_dialog())
-            } else {
-                (None, ActionObservationOutcome::not_requested())
+        let (observation, observation_outcome) = if observation_options.is_some()
+            && !dialog_blocking
+        {
+            let capture = async {
+                let after_context = self.context(&target_id).await?;
+                let mut options = observation_options.expect("checked above").clone();
+                options.diff_from = baseline.map(|record| record.output.id.clone());
+                let record = observation_engine::capture(
+                    &after_context,
+                    client_id,
+                    Uuid::new_v4().to_string(),
+                    self.observations.next_revision(&target_id).await,
+                    &options,
+                    baseline,
+                )
+                .await?;
+                self.observations.insert(record).await
             };
+            let capture_budget = deadline
+                .saturating_duration_since(Instant::now())
+                .saturating_sub(ACTION_RESPONSE_RESERVE);
+            let capture = if capture_budget.is_zero() {
+                Err(AbError::new(
+                    "timeout",
+                    "action.observation.deadline",
+                    "request deadline elapsed after input dispatch and before post-action observation",
+                ))
+            } else {
+                match timeout(capture_budget, capture).await {
+                    Ok(result) => result,
+                    Err(_) => Err(AbError::new(
+                        "timeout",
+                        "action.observation.deadline",
+                        "post-action observation did not finish before the request deadline",
+                    )),
+                }
+            };
+            match capture {
+                Ok(observation) => (Some(observation), ActionObservationOutcome::completed()),
+                Err(error) => (None, ActionObservationOutcome::failed(error)),
+            }
+        } else if observation_options.is_some() {
+            (None, ActionObservationOutcome::skipped_dialog())
+        } else {
+            (None, ActionObservationOutcome::not_requested())
+        };
         let ended_at_unix_ms = unix_ms();
         let duration_ms = transaction.started_at.elapsed().as_millis() as u64;
         Ok(ActionResult {
@@ -866,6 +926,7 @@ impl BrowserCore {
         element_id: &str,
         operation: &str,
         arguments: &Value,
+        deadline: Instant,
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
         let target = self.elements.target(client_id, element_id).await?;
@@ -890,7 +951,9 @@ impl BrowserCore {
             .await?;
         let mut identity = ActionTargetIdentity::new("elementHandle", &target);
         identity.element_id = Some(element_id.to_owned());
-        let transaction = self.begin_action(&context, operation, identity).await?;
+        let transaction = self
+            .begin_action(&context, operation, identity, deadline)
+            .await?;
         dispatch_marker.mark_started();
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             ActionRunner::drag(&context, &target, drag_target).await
@@ -930,6 +993,7 @@ impl BrowserCore {
         client_id: &str,
         target_id: &str,
         params: &Value,
+        deadline: Instant,
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
         let observation_id = required_string(params, "observationId", "action.observation")?;
@@ -1031,7 +1095,9 @@ impl BrowserCore {
         } else {
             None
         };
-        let transaction = self.begin_action(&context, action, identity).await?;
+        let transaction = self
+            .begin_action(&context, action, identity, deadline)
+            .await?;
         dispatch_marker.mark_started();
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             ActionRunner::drag(&context, &target, drag_target).await
@@ -1146,7 +1212,7 @@ impl BrowserCore {
                         .await?;
                     let identity = ActionTargetIdentity::new("locator", &target);
                     let transaction = self
-                        .begin_action(&context, &request.operation, identity)
+                        .begin_action(&context, &request.operation, identity, deadline)
                         .await?;
                     dispatch_marker.mark_started();
                     let outcome = if request.operation == "drag" {
@@ -2183,8 +2249,18 @@ async fn collect_file_chooser(
     sessions: Arc<super::session_manager::SessionManager>,
     target_id: &str,
     receiver: &mut broadcast::Receiver<CdpEvent>,
+    request_deadline: Instant,
 ) -> FileChooserOutcome {
-    let deadline = Instant::now() + Duration::from_millis(75);
+    let available = request_deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(ACTION_RESPONSE_RESERVE);
+    if available.is_zero() {
+        let mut outcome = FileChooserOutcome::none();
+        outcome.complete = false;
+        return outcome;
+    }
+    let complete_window = available >= Duration::from_millis(75);
+    let deadline = Instant::now() + available.min(Duration::from_millis(75));
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -2225,9 +2301,53 @@ async fn collect_file_chooser(
                 outcome.complete = false;
                 return outcome;
             }
-            Err(_) => return FileChooserOutcome::none(),
+            Err(_) => {
+                let mut outcome = FileChooserOutcome::none();
+                outcome.complete = complete_window;
+                return outcome;
+            }
         }
     }
+}
+
+async fn document_ready_state(context: &TargetContext, deadline: Instant) -> Option<String> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return None;
+    }
+    context
+        .client
+        .send_command_with_timeout(
+            "Runtime.evaluate",
+            Some(json!({
+                "expression": "document.readyState",
+                "returnByValue": true,
+                "awaitPromise": false,
+            })),
+            Some(&context.root_session_id),
+            remaining.min(Duration::from_millis(250)),
+        )
+        .await
+        .ok()?
+        .pointer("/result/value")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn lifecycle_state_reached(wait_until: &str, ready_state: &str) -> bool {
+    match wait_until {
+        "domcontentloaded" => matches!(ready_state, "interactive" | "complete"),
+        "load" => ready_state == "complete",
+        _ => false,
+    }
+}
+
+fn navigation_deadline_error(wait_until: &str) -> AbError {
+    AbError::new(
+        "timeout",
+        "tab.navigate.wait",
+        format!("{wait_until} did not occur before the request deadline"),
+    )
 }
 
 fn unix_ms() -> u64 {
@@ -2238,6 +2358,7 @@ fn unix_ms() -> u64 {
 }
 
 const LOCATOR_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+const ACTION_RESPONSE_RESERVE: Duration = Duration::from_millis(25);
 
 fn locator_retry_budget_exhausted(deadline: Instant) -> bool {
     deadline.saturating_duration_since(Instant::now()) <= LOCATOR_RETRY_INTERVAL

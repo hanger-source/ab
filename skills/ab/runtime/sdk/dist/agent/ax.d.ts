@@ -41,6 +41,10 @@ export declare class AX {
     setFiles(refId: string, files: string | string[], options?: RefActionOptions): Promise<ActionResult>;
     dragTo(sourceRefId: string, targetRefId: string, options?: RefActionOptions): Promise<ActionResult>;
     scrollIntoView(refId: string, options?: RefActionOptions): Promise<ActionResult>;
+    /** Releases every live AX observation owned by this Agent tab. The AX surface remains usable. */
+    dispose(): Promise<void>;
+    /** Number of live AX observations currently retained by this Agent tab. */
+    get liveObservations(): number;
 }
 export {};
 //# sourceMappingURL=ax.d.ts.map

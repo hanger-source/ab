@@ -216,17 +216,21 @@ export class Locator {
     return this.#perform(options, "none", (coreOptions) => this.#core.scrollIntoView(coreOptions));
   }
 
-  fill(value: string, options: LocatorActionOptions = {}): Promise<LocatorResult<TextInputActionData>> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.fill(value, coreOptions));
+  async fill(value: string, options: LocatorActionOptions = {}): Promise<LocatorResult<TextInputActionData>> {
+    const result = await this.#perform(options, "diff", (coreOptions) => this.#core.fill(value, coreOptions));
+    await this.#ax.presentTextInputOutcome(result);
+    return result;
   }
 
-  type(text: string, options: LocatorTypeOptions = {}): Promise<LocatorResult<TextInputActionData>> {
+  async type(text: string, options: LocatorTypeOptions = {}): Promise<LocatorResult<TextInputActionData>> {
     const { clear, delayMs, ...actionOptions } = options;
-    return this.#perform(actionOptions, "diff", (coreOptions) => this.#core.type(text, {
+    const result = await this.#perform(actionOptions, "diff", (coreOptions) => this.#core.type(text, {
       ...coreOptions,
       ...(clear === undefined ? {} : { clear }),
       ...(delayMs === undefined ? {} : { delayMs }),
     }));
+    await this.#ax.presentTextInputOutcome(result);
+    return result;
   }
 
   async fillAndSelectSuggestion(
@@ -294,10 +298,21 @@ export class Locator {
 
   domInvoke<T = unknown>(
     method: string,
-    args: unknown[] = [],
+    options?: LocatorActionOptions,
+  ): Promise<LocatorResult<{ value?: T }>>;
+  domInvoke<T = unknown>(
+    method: string,
+    args: unknown[],
+    options?: LocatorActionOptions,
+  ): Promise<LocatorResult<{ value?: T }>>;
+  domInvoke<T = unknown>(
+    method: string,
+    argsOrOptions: unknown[] | LocatorActionOptions = [],
     options: LocatorActionOptions = {},
   ): Promise<LocatorResult<{ value?: T }>> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.domInvoke<T>(method, args, coreOptions));
+    const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
+    const actionOptions = Array.isArray(argsOrOptions) ? options : argsOrOptions;
+    return this.#perform(actionOptions, "diff", (coreOptions) => this.#core.domInvoke<T>(method, args, coreOptions));
   }
 
   screenshot(options: OperationOptions = {}): Promise<Screenshot> {

@@ -79,6 +79,8 @@ export type ActionObservationOutcome = {
 export type TextInputFieldOutcome = {
   requestedText: string;
   inputValue: string | null;
+  /** Exact final-value check for fill() and type(..., { clear: true }); null for append typing. */
+  matchesRequestedText: boolean | null;
   popupBacked: boolean;
   signals: string[];
   next: "selectSuggestion" | "none";

@@ -20,8 +20,10 @@ try {
     taskTab = await browser.tabs.open("data:text/html," + encodeURIComponent(`
       <title>AB Skill client</title>
       <label>Email <input aria-label="Email"></label>
+      <label>Short name <input aria-label="Short name" maxlength="15"></label>
       <button onclick="result.textContent = 'Saved: ' + document.querySelector('input').value">Continue</button>
       <button onclick="result.textContent = 'Silent action completed'">Silent action</button>
+      <button onclick="history.pushState({}, '', '#after-action'); result.textContent = 'Navigated action completed'">Navigate action</button>
       <output id="result"></output>
     `));
     assert.equal(taskTab.core, undefined);
@@ -68,7 +70,7 @@ try {
     const silentResult = await taskTab.playwright.getByRole("button", {
       name: "Silent action",
       exact: true,
-    }).click({ write: "none" });
+    }).domInvoke("click", { write: "none" });
     assert.deepEqual(silentResult.observationOutcome, { status: "notRequested" });
     assert.equal(silentResult.observation, null);
     assert.equal(
@@ -79,6 +81,24 @@ try {
       await taskTab.playwright.getByText("Silent action completed", { exact: true }).textContent(),
       "Silent action completed",
     );
+
+    await taskTab.playwright.getByRole("button", {
+      name: "Navigate action",
+      exact: true,
+    }).click();
+    const navigationPresentation = presented.filter((value) => value.kind === "ax").at(-1);
+    assert(navigationPresentation);
+    assert.match(navigationPresentation.origin, /#after-action$/);
+    assert.match(taskTab.url, /#after-action$/);
+    assert.match(navigationPresentation.text, /Navigated action completed/);
+
+    const inputWarningCount = presented.filter((value) => value.kind === "action").length;
+    const shortened = await taskTab.playwright.getByLabel("Short name").fill("a deliberately overlong value");
+    assert.equal(shortened.data.field.matchesRequestedText, false);
+    assert.equal(shortened.data.field.inputValue?.length, 15);
+    const inputWarnings = presented.filter((value) => value.kind === "action");
+    assert.equal(inputWarnings.length, inputWarningCount + 1);
+    assert.match(inputWarnings.at(-1).text, /did not retain the requested text exactly/);
 
     const beforeWaitPresentations = presented.filter((value) => value.kind === "ax").length;
     await taskTab.dev.evaluate(() => {
@@ -99,6 +119,16 @@ try {
     const afterWaitPresentations = presented.filter((value) => value.kind === "ax");
     assert.equal(afterWaitPresentations.length, beforeWaitPresentations + 1);
     assert.match(afterWaitPresentations.at(-1).text, /Delayed semantic option/);
+
+    const retainedOne = await taskTab.ax.get("state", { mode: "interactive" });
+    const retainedTwo = await taskTab.ax.get("state", { mode: "interactive" });
+    assert(taskTab.ax.liveObservations >= 3);
+    await taskTab.ax.dispose();
+    assert.equal(taskTab.ax.liveObservations, 0);
+    assert.equal(retainedOne.disposed, true);
+    assert.equal(retainedTwo.disposed, true);
+    await taskTab.ax.write("state", { mode: "interactive" });
+    assert.equal(taskTab.ax.liveObservations, 1);
 
     await browser.documentation("screenshot");
     const screenshot = await taskTab.ax.get("screenshot");

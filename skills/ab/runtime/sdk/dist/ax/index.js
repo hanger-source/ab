@@ -241,6 +241,10 @@ export class AXState {
         }, options);
         this.#disposed = true;
     }
+    /** Whether this client has released the observation record. */
+    get disposed() {
+        return this.#disposed;
+    }
     [inspect.custom]() {
         return `AXState { id: '${this.id}', revision: ${this.revision}, refs: ${this.#refs.length}, complete: ${this.complete}, truncated: ${this.truncated}, documentGeneration: '${this.documentGeneration}' }`;
     }

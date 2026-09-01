@@ -121,6 +121,18 @@ try {
   );
   assert.equal(presentations.at(-1)?.text, interactiveCurrent.diff.text);
 
+  const deadlineTarget = interactiveCurrent.refs().find((ref) => ref.name === "Toggle local detail");
+  assert(deadlineTarget, "deadline action target is missing from the retained observation");
+  const deadlineAction = await deadlineTarget.click({
+    observe: "state",
+    observation: { mode: "full", surface: "active", maxChars: 24_000 },
+    timeoutMs: 75,
+  });
+  assert.equal(deadlineAction.observation, null);
+  assert.equal(deadlineAction.observationOutcome.status, "failed");
+  assert.equal(deadlineAction.observationOutcome.error?.kind, "timeout");
+  assert.equal(deadlineAction.observationOutcome.error?.stage, "action.observation.deadline");
+
   console.log(JSON.stringify({
     scenario: "large-document-local-mutation",
     baseline: baselineSummary,
@@ -141,6 +153,7 @@ try {
       additions: interactiveCurrent.diff.additions,
       removals: interactiveCurrent.diff.removals,
     },
+    deadlineAction: deadlineAction.observationOutcome,
   }, null, 2));
 
   await browser.disconnect();

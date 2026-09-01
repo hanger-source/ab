@@ -855,6 +855,27 @@ const BLOCKER_AT_JS: &str = r#"(doc, el, x, y) => {
     if (hitLabel && (hitLabel.control === el || hitLabel.contains(el))) return null;
     const elLabel = el.closest ? el.closest('label') : null;
     if (elLabel && elLabel.contains(hit)) return null;
+    // Virtualized composite widgets sometimes expose a zero-area ARIA item
+    // beside a separate visible presentation node. The semantic node is the
+    // right Agent target, while pointer input must land on the presentation.
+    // Only accept that proxy when the target is degenerate, its role is an
+    // item role, and the hit surface carries the same normalized text. Real
+    // overlays over ordinary actionable elements still fail interception.
+    const rect = el.getBoundingClientRect();
+    const mirrorRoles = new Set([
+        'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+        'treeitem', 'tab', 'row', 'gridcell'
+    ]);
+    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const targetText = normalizeText(el.getAttribute && el.getAttribute('aria-label')) ||
+        normalizeText(el.textContent);
+    if ((rect.width <= 1 || rect.height <= 1) &&
+        mirrorRoles.has(el.getAttribute && el.getAttribute('role')) && targetText) {
+        for (let n = hit; n && n !== d.documentElement; n = up(n)) {
+            if (normalizeText(n.getAttribute && n.getAttribute('aria-label')) === targetText ||
+                normalizeText(n.textContent) === targetText) return null;
+        }
+    }
     let desc = hit.tagName.toLowerCase();
     if (hit.id) desc += '#' + hit.id;
     else if (typeof hit.className === 'string' && hit.className.trim())

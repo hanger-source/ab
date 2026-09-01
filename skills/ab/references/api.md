@@ -310,7 +310,7 @@ locator.screenshot(options?)
 
 Locators are immutable query objects. A builder call does not touch the browser.
 
-`fill()` and `type()` return `ActionResult<TextInputActionData>`. Its `data.field` contains `requestedText`, settled `inputValue`, `popupBacked`, `signals`, and `next: "selectSuggestion" | "none"`. The same typed data is returned by Locator, AXRef, and ElementHandle input actions.
+`fill()` and `type()` return `ActionResult<TextInputActionData>`. Its `data.field` contains `requestedText`, settled `inputValue`, `matchesRequestedText`, `popupBacked`, `signals`, and `next: "selectSuggestion" | "none"`. `matchesRequestedText` is `boolean` for replacement input and `null` for append typing. The same typed data is returned by Locator, AXRef, and ElementHandle input actions.
 
 `fillAndSelectSuggestion()` returns `{ input, selection, suggestion, committedValue }`. It resolves `suggestionText` only among actionable refs newly introduced after the fill; `suggestion` preserves the chosen observation/ref/role/name identity. Core Locator keeps explicit `observe`; Locator uses `write` and presents only the final selection result.
 

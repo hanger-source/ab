@@ -120,16 +120,20 @@ export class Locator {
     scrollIntoView(options = {}) {
         return this.#perform(options, "none", (coreOptions) => this.#core.scrollIntoView(coreOptions));
     }
-    fill(value, options = {}) {
-        return this.#perform(options, "diff", (coreOptions) => this.#core.fill(value, coreOptions));
+    async fill(value, options = {}) {
+        const result = await this.#perform(options, "diff", (coreOptions) => this.#core.fill(value, coreOptions));
+        await this.#ax.presentTextInputOutcome(result);
+        return result;
     }
-    type(text, options = {}) {
+    async type(text, options = {}) {
         const { clear, delayMs, ...actionOptions } = options;
-        return this.#perform(actionOptions, "diff", (coreOptions) => this.#core.type(text, {
+        const result = await this.#perform(actionOptions, "diff", (coreOptions) => this.#core.type(text, {
             ...coreOptions,
             ...(clear === undefined ? {} : { clear }),
             ...(delayMs === undefined ? {} : { delayMs }),
         }));
+        await this.#ax.presentTextInputOutcome(result);
+        return result;
     }
     async fillAndSelectSuggestion(query, suggestionText, options = {}) {
         assertOwnedObservation(options);
@@ -182,8 +186,10 @@ export class Locator {
     innerText(options = {}) {
         return this.#core.innerText(options);
     }
-    domInvoke(method, args = [], options = {}) {
-        return this.#perform(options, "diff", (coreOptions) => this.#core.domInvoke(method, args, coreOptions));
+    domInvoke(method, argsOrOptions = [], options = {}) {
+        const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
+        const actionOptions = Array.isArray(argsOrOptions) ? options : argsOrOptions;
+        return this.#perform(actionOptions, "diff", (coreOptions) => this.#core.domInvoke(method, args, coreOptions));
     }
     screenshot(options = {}) {
         return this.#core.screenshot(options);

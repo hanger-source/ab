@@ -154,7 +154,7 @@ impl ActionRunner {
                 )
                 .await
                 .map_err(|message| action_error("fill", message))?;
-                text_input_outcome(context, target, requested).await?
+                text_input_outcome(context, target, requested, true).await?
             }
             "type" => {
                 let requested = required_string(arguments, "text", "type")?;
@@ -176,7 +176,11 @@ impl ActionRunner {
                 )
                 .await
                 .map_err(|message| action_error("type", message))?;
-                text_input_outcome(context, target, requested).await?
+                let replaces_value = arguments
+                    .get("clear")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                text_input_outcome(context, target, requested, replaces_value).await?
             }
             "press" => {
                 interaction::focus(
@@ -633,6 +637,7 @@ async fn text_input_outcome(
     context: &TargetContext,
     target: &ElementTarget,
     requested_text: &str,
+    replaces_value: bool,
 ) -> AbResult<Value> {
     let request = json!({
         "attributes": [
@@ -682,10 +687,17 @@ async fn text_input_outcome(
     }
     let popup_backed = !signals.is_empty();
     let settled = inspect_node(context, target, &request).await?;
+    let input_value = settled.value;
+    let matches_requested_text = if replaces_value {
+        input_value.as_deref().map(|value| value == requested_text)
+    } else {
+        None
+    };
     Ok(json!({
         "field": {
             "requestedText": requested_text,
-            "inputValue": settled.value,
+            "inputValue": input_value,
+            "matchesRequestedText": matches_requested_text,
             "popupBacked": popup_backed,
             "signals": signals,
             "next": if popup_backed { "selectSuggestion" } else { "none" }

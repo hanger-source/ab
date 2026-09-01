@@ -167,6 +167,8 @@ Keep the row identity and control identity explicit. Do not read one row and wri
 
 First filter the grid and establish the exact business identities of all intended rows. Keep that identity set in the retained Node session; checkbox selection alone is not durable identity.
 
+This also applies outside literal grids. If the instruction says all/every/each, sets a threshold, or names an exact count, enumerate the complete matching collection before changing the first item. Account for relevant pagination and filters, then maintain `intendedIds` and `completedIds` separately. When a successful mutation removes an item from the pending view, reconcile the remaining original identities instead of treating the shorter view as completion.
+
 A bulk-action menu does not prove that the requested field is editable in bulk. Open one candidate bulk form, observe its visible fields, and use it only when the exact requested field is present. If the field is absent, leave without submitting and switch immediately to each row's edit workflow; do not spend the task window probing nearby bulk actions.
 
 For each identified row:

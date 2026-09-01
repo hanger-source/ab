@@ -6,6 +6,7 @@ export class AX {
     #tab;
     #presenter;
     #documentation;
+    #ownedStates = new Set();
     #lastPresentedState = null;
     constructor(tab, presenter, documentation) {
         this.#tab = tab;
@@ -21,12 +22,12 @@ export class AX {
             this.#documentation.require("screenshot", `tab.ax.get(${JSON.stringify(content)})`);
         }
         if (content === "state") {
-            return this.#tab.ax.snapshot(snapshotOptions(options));
+            return this.#track(await this.#tab.ax.snapshot(snapshotOptions(options)));
         }
         if (content === "screenshot") {
             return this.#tab.screenshot({ ...options, scale: options.scale ?? "css" });
         }
-        return this.#tab.observe({
+        const observation = await this.#tab.observe({
             ax: snapshotOptions(options),
             screenshot: true,
             fullPage: options.fullPage ?? false,
@@ -34,6 +35,9 @@ export class AX {
             ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
             ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
+        if (observation.state)
+            this.#track(observation.state);
+        return observation;
     }
     async write(content, options = {}) {
         if (typeof content !== "string") {
@@ -73,13 +77,17 @@ export class AX {
             const screenshot = await this.get("screenshot", options);
             await this.#presenter.presentImage({
                 kind: "screenshot",
-                origin: this.#tab.url,
+                origin: await this.#currentOrigin(),
                 screenshot,
             });
             return;
         }
         const observation = await this.get("both", options);
         if (!observation.state || !observation.screenshot) {
+            if (observation.state) {
+                await observation.state.dispose().catch(() => undefined);
+                this.#ownedStates.delete(observation.state);
+            }
             throw new ABError({
                 kind: "observation_incomplete",
                 stage: "agent.ax.write",
@@ -118,11 +126,19 @@ export class AX {
     }
     fill(refId, value, options = {}) {
         const { write = "diff", ...action } = options;
-        return this.#perform(refId, write, (ref) => ref.fill(value, actionOptions(action, write)));
+        return this.#perform(refId, write, (ref) => ref.fill(value, actionOptions(action, write)))
+            .then(async (result) => {
+            await this.presentTextInputOutcome(result);
+            return result;
+        });
     }
     type(refId, text, options = {}) {
         const { write = "diff", ...action } = options;
-        return this.#perform(refId, write, (ref) => ref.type(text, actionOptions(action, write)));
+        return this.#perform(refId, write, (ref) => ref.type(text, actionOptions(action, write)))
+            .then(async (result) => {
+            await this.presentTextInputOutcome(result);
+            return result;
+        });
     }
     press(refId, key, options = {}) {
         const { write = "diff", ...action } = options;
@@ -160,11 +176,21 @@ export class AX {
         const { write = "none", ...action } = options;
         return this.#perform(refId, write, (ref) => ref.scrollIntoView(actionOptions(action, write)));
     }
-    /** @internal */
+    /** Releases every live AX observation owned by this Agent tab. The AX surface remains usable. */
     async dispose() {
-        const state = this.#lastPresentedState;
+        this.#pruneDisposedStates();
+        const states = [...this.#ownedStates];
+        this.#ownedStates.clear();
         this.#lastPresentedState = null;
-        await state?.dispose();
+        const outcomes = await Promise.allSettled(states.map((state) => state.dispose()));
+        const failed = outcomes.find((outcome) => outcome.status === "rejected");
+        if (failed)
+            throw failed.reason;
+    }
+    /** Number of live AX observations currently retained by this Agent tab. */
+    get liveObservations() {
+        this.#pruneDisposedStates();
+        return this.#ownedStates.size;
     }
     /** The exact observation currently visible to this Agent session. */
     /** @internal */
@@ -179,21 +205,49 @@ export class AX {
             : "";
         await this.#presenter.presentText({
             kind: "action",
-            origin: this.#tab.url,
+            origin: await this.#currentOrigin(),
             observationId: null,
             text: `AB action ${result.action} dispatch completed; post-action observation ${outcome.status}.${failure} Observe current page state before deciding on another mutation.`,
             untrusted: false,
         });
     }
+    /** @internal */
+    async presentTextInputOutcome(result) {
+        if (result.data.field.matchesRequestedText !== false)
+            return;
+        await this.#presenter.presentText({
+            kind: "action",
+            origin: await this.#currentOrigin(),
+            observationId: null,
+            text: "AB input dispatch completed, but the field did not retain the requested text exactly. Inspect result.data.field.inputValue before submitting; the control may enforce maxlength or normalization.",
+            untrusted: false,
+        });
+    }
     #ref(refId) {
-        if (!this.#lastPresentedState) {
+        const state = this.#lastPresentedState;
+        if (!state || state.disposed) {
             throw new ABError({
                 kind: "agent_observation_required",
                 stage: "agent.ax.ref",
-                message: `tab ${this.#tab.id} has no successfully presented AX observation`,
+                message: `tab ${this.#tab.id} has no live successfully presented AX observation; call ax.write("state") before using a short ref`,
             });
         }
-        return this.#lastPresentedState.ref(refId);
+        const normalized = refId.startsWith("@") ? refId.slice(1) : refId;
+        const reference = state.refs().find((candidate) => candidate.id === normalized);
+        if (!reference) {
+            throw new ABError({
+                kind: "ref_not_found",
+                stage: "agent.ax.ref",
+                message: `short ref ${refId} is not part of the current presented observation ${state.id}; ax.get() does not change this baseline`,
+                details: {
+                    observationId: state.id,
+                    revision: state.revision,
+                    refs: state.refs().length,
+                    truncated: state.truncated,
+                },
+            });
+        }
+        return reference;
     }
     async #perform(refId, write, action) {
         const result = await action(this.#ref(refId));
@@ -216,7 +270,7 @@ export class AX {
         }
         return result;
     }
-    #presentState(state) {
+    async #presentState(state) {
         const text = state.diff && !state.diff.documentReplaced && !state.diff.surfaceReplaced
             ? state.diff.text || "No accessibility-tree text changed after the action."
             : state.text;
@@ -227,20 +281,39 @@ export class AX {
                 : state.diff
                     ? "incremental"
                     : "full";
-        return this.#presenter.presentText({
+        const origin = await this.#currentOrigin();
+        await this.#presenter.presentText({
             kind: "ax",
-            origin: this.#tab.url,
+            origin,
             observationId: state.id,
             text,
             untrusted: true,
             presentation,
         });
     }
+    async #currentOrigin() {
+        await this.#tab.refresh();
+        return this.#tab.url;
+    }
     async #replacePresentedState(state) {
         const previous = this.#lastPresentedState;
+        this.#track(state);
         this.#lastPresentedState = state;
-        if (previous && previous !== state)
+        if (previous && previous !== state) {
             await previous.dispose();
+            this.#ownedStates.delete(previous);
+        }
+    }
+    #track(state) {
+        this.#pruneDisposedStates();
+        this.#ownedStates.add(state);
+        return state;
+    }
+    #pruneDisposedStates() {
+        for (const state of this.#ownedStates) {
+            if (state.disposed)
+                this.#ownedStates.delete(state);
+        }
     }
 }
 function snapshotOptions(options) {

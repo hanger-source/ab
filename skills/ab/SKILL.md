@@ -86,10 +86,16 @@ Use `get()` when code needs the typed object without showing it or changing the 
 
 ```ts
 const state = await tab.ax.get("state");
-await state.ref("e12").click({ observe: "diff" });
+try {
+  await state.ref("e12").click({ observe: "diff" });
+} finally {
+  await state.dispose();
+}
 ```
 
 `get()` never makes `e12` available to later short-ref calls. `write("screenshot")` also leaves the AX baseline unchanged. Only a successfully displayed state or both observation advances it.
+
+Every typed state returned by `get("state" | "both")` is a live server observation until disposed. `tab.ax.liveObservations` exposes the current Agent-owned count. If a workflow abandons several states or recovery needs a clean observation set, `await tab.ax.dispose()` releases all of them, including the presented short-ref baseline, without disconnecting the browser; call `write("state")` again before the next short-ref action.
 
 The Agent facade defaults to `mode: "full", surface: "active"`. When a modal or full-viewport fixed editor is active, Rust scopes text and refs to that exact DOM subtree instead of mixing the covered document into the operation surface. Without such a layer, the active surface is the document. Core snapshots remain `surface: "document"` unless requested otherwise. Use `mode: "interactive"` only after the surrounding context is already known and a smaller action-only view is deliberately wanted. Check `complete`, `truncated`, and `sources.surface` before claiming the observation covers the relevant surface.
 
@@ -127,6 +133,8 @@ The mechanical sequence is: observe and inventory controls → fill one stable f
 Read [forms](references/forms.md) before operating an unfamiliar structured form.
 
 For a repeated mutation across filtered table rows, read [task recipes](references/task-recipes.md) before using a bulk action. A bulk menu is only a candidate capability: if its visible form does not contain the requested field, leave it without submitting and immediately continue through each identified row's edit workflow. Keep the intended row identities and completed identities explicitly; for add/increase/receive tasks, read each current value and write the computed result rather than the requested delta.
+
+When the instruction quantifies a collection (`all`, `every`, `each`, a threshold such as `four stars or higher`, or an exact count), inventory the complete matching identity set before the first mutation, including relevant pagination or filters. Keep separate intended and completed identity sets, and reconcile them after every mutation. A row disappearing from the current filtered view proves only that row changed; it does not prove the remaining original matches were handled. Do not report success until every intended identity has a verified final state.
 
 Treat a hierarchical menu path as a disclosure sequence, not a series of clicks. When the requested descendant is absent from the current observation, hover the matching parent and capture a fresh state; clicking that parent merely to discover children can commit the wrong choice. Discard the old refs after each flyout appears, then continue through the newly observed child and click only the requested leaf.
 

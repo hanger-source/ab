@@ -160,6 +160,8 @@ export declare class AXState {
     refs(): readonly AXRef[];
     /** Releases the server observation record. Existing refs become unusable. */
     dispose(options?: OperationOptions): Promise<void>;
+    /** Whether this client has released the observation record. */
+    get disposed(): boolean;
     [inspect.custom](): string;
 }
 /** Explicit accessibility capture surface for one tab. */

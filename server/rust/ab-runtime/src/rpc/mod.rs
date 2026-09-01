@@ -539,12 +539,13 @@ async fn dispatch(
                 .get("waitUntil")
                 .and_then(Value::as_str)
                 .unwrap_or("domcontentloaded");
-            let timeout_ms = params
-                .get("timeoutMs")
-                .and_then(Value::as_u64)
-                .unwrap_or(30_000);
             browser
-                .navigate(required_target(target_id)?, url, wait_until, timeout_ms)
+                .navigate(
+                    required_target(target_id)?,
+                    url,
+                    wait_until,
+                    request_deadline,
+                )
                 .await
         }
         "tab.screenshot" => {
@@ -639,6 +640,7 @@ async fn dispatch(
                     &client_id,
                     required_target(target_id)?,
                     &params,
+                    request_deadline,
                     &dispatch_marker,
                 )
                 .await
@@ -649,6 +651,7 @@ async fn dispatch(
                     &client_id,
                     required_target(target_id)?,
                     &params,
+                    request_deadline,
                     &dispatch_marker,
                 )
                 .await
@@ -719,6 +722,7 @@ async fn dispatch(
                     element_id,
                     operation,
                     arguments,
+                    request_deadline,
                     &dispatch_marker,
                 )
                 .await

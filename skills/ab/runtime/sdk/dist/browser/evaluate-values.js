@@ -253,27 +253,23 @@ function serializePageFunction(fn) {
     const source = Function.prototype.toString.call(fn).trim();
     if (!source || source.includes("[native code]"))
         throw serializationError("$function", "a user-defined function is required");
-    if (isFunctionExpression(source))
+    if (isStandaloneFunctionSource(source))
         return `(${source})`;
-    const candidates = /^async\s+\*/.test(source)
-        ? [`async function* ${source.replace(/^async\s+\*\s*/, "")}`]
+    const normalized = /^async\s+\*/.test(source)
+        ? `async function* ${source.replace(/^async\s+\*\s*/, "")}`
         : /^async\s+/.test(source)
-            ? [`async function ${source.replace(/^async\s+/, "")}`]
+            ? `async function ${source.replace(/^async\s+/, "")}`
             : /^\*/.test(source)
-                ? [`function* ${source.replace(/^\*\s*/, "")}`]
-                : [`function ${source}`];
-    const normalized = candidates.find(isFunctionExpression);
-    if (!normalized)
-        throw serializationError("$function", "unsupported function syntax");
+                ? `function* ${source.replace(/^\*\s*/, "")}`
+                : `function ${source}`;
     return `(${normalized})`;
 }
-function isFunctionExpression(source) {
-    try {
-        return typeof Function(`return (${source})`)() === "function";
-    }
-    catch {
-        return false;
-    }
+function isStandaloneFunctionSource(source) {
+    if (/^(?:async\s+)?function(?:\s*\*)?\b/.test(source))
+        return true;
+    if (/^\(/.test(source) || /^async\s*\(/.test(source))
+        return true;
+    return /^(?:async\s+)?[$A-Z_a-z][$\w]*\s*=>/.test(source);
 }
 function encodeNumber(value) {
     if (Object.is(value, -0))

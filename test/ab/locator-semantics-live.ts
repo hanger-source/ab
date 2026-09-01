@@ -25,6 +25,12 @@ const server = http.createServer((_request, response) => {
     <div data-testid="wheel-box" style="width:160px;height:80px;overflow:auto"><div style="height:500px">Wheel surface</div></div>
     <div data-testid="drag-source" style="width:80px;height:40px">Drag source</div>
     <div data-testid="drag-target" style="width:100px;height:50px">Drop target</div>
+    <div id="virtual-composite" style="position:relative;width:196px;height:32px">
+      <div role="listbox" style="position:absolute;left:1px;top:5px;width:0;height:0">
+        <div role="option" aria-selected="false" style="width:0;height:22px">Virtual choice</div>
+      </div>
+      <div data-testid="virtual-choice" style="position:absolute;inset:0">Virtual choice</div>
+    </div>
     <div id="shadow-host"></div>
     <script>
       globalThis.clicked = [];
@@ -38,6 +44,7 @@ const server = http.createServer((_request, response) => {
       document.querySelector('[data-testid="wheel-box"]').addEventListener('wheel', () => wheelEvents += 1);
       document.querySelector('[data-testid="drag-source"]').addEventListener('mousedown', () => dragging = true);
       document.querySelector('[data-testid="drag-target"]').addEventListener('mouseup', () => dropped = dragging);
+      document.querySelector('[data-testid="virtual-choice"]').onclick = () => document.body.dataset.virtualChoice = 'selected';
       document.addEventListener('mouseup', () => dragging = false);
       const shadow = document.querySelector('#shadow-host').attachShadow({ mode: 'open' });
       shadow.innerHTML = '<button data-testid="shadow-save">Shadow action</button>';
@@ -222,6 +229,20 @@ try {
     });
     assert.equal(await readonlyDate.inputValue(), "");
 
+    const closedOption = tab.getByRole("option", { name: "B", exact: true });
+    assert.equal(await closedOption.count(), 1);
+    assert.equal((await closedOption.inspect()).value, "b");
+    const virtualState = await tab.ax.snapshot({ mode: "interactive" });
+    const virtualOption = virtualState.refs().find(
+      (reference) => reference.role === "option" && reference.name === "Virtual choice",
+    );
+    assert(virtualOption, virtualState.text);
+    const virtualInspection = await virtualOption.inspect();
+    assert.equal(virtualInspection.visible, false);
+    assert.equal(virtualInspection.bounds.width, 0);
+    await virtualOption.click();
+    assert.equal(await tab.evaluate(() => document.body.dataset.virtualChoice), "selected");
+    await virtualState.dispose();
     await tab.getByLabel("choice").selectOption("b");
     await tab.getByLabel("enabled").check();
     assert.equal(await tab.getByLabel("enabled").isChecked(), true);
