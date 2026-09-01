@@ -40,7 +40,7 @@
 | 549 | source-aware | 1.0 | 1837 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware-r2/549/` | 新属性与唯一 `XXXL + Green` 变体均由官方网络 evaluator 接受 |
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
 | 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
-| 610 | source-aware | 待执行 | — | — | — |
+| 610 | source-aware | 1.0 | 89 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/610/` | AX/ref 完成发帖后在同一新帖继续评论，两个连续 POST 均被官方 evaluator 接受 |
 | 733 | source-aware | 待执行 | — | — | — |
 
 所有完成项以目录中的 `eval_result.json` 为准，不以页面成功提示或 Agent 自报成功代替。后续结果必须继续写入本台账并绑定候选 commit；如果同一任务在后续 commit 失败，先和这里的 commit、任务模式、evaluator checksum 与完整操作边界比较，再判断是产品回归、Agent 规划差异还是外部环境变化。
@@ -84,6 +84,8 @@ Rust daemon、Chrome、tab 与页面 mutation 均在重连后保留，因此持�
 
 同一 `Tab` 从 Dashboard 导航到 Product Attributes 与属性编辑页后，若不重连，Presenter 仍多次把 observation origin 标成 Dashboard URL；重连后 origin 才变成实际商品页 URL。操作 target 没有漂移，但模型可见的页面身份滞后，违背 observation identity 应来自当前 document 的要求。
 
+610 把这一问题推进到更强的可证伪状态：创建帖子后，AX 正文已经完整显示新帖、Comment 表单和后续 `good book!` 评论，但 `Tab.url` 与两次 observation origin 仍停留在 `/submit`。因此这不是页面中间态或 Magento 特例，而是 document replacement 后 URL identity 没有同步到 Agent observation。
+
 ### pointer click 的可证伪 no-op
 
 Magento 的 `Edit Configurations` 对普通 pointer click 返回成功但没有打开 dialog。确认 dialog 不存在后，通过已有 `domInvoke("click")` 打开了配置向导。这里没有新增 fallback：pointer action 与 DOM activation 仍是两个显式动作，调用方根据页面事实决定是否使用后者。
@@ -98,8 +100,12 @@ Magento 的 `Edit Configurations` 对普通 pointer click 返回成功但没有�
 
 Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Name filter 使用 `Minerva` 后返回父商品和 15 个变体。特殊字符、搜索索引和筛选语义属于站点行为，不构成 AB selector 或搜索 helper 的理由。
 
+### AX option 与 Locator 匹配不一致
+
+610 的 AX state 明确呈现关闭的原生 Forum select 及 `option "books"`，但同一时刻 `getByRole("option", { name: "books", exact: true }).inspect()` 等待 30 秒后报 locator 未匹配。任务最终使用已有 observation 的 combobox ref 和官方 source-aware forum 值完成，没有新增选择器或特判。该差异属于 AX 渲染与 Locator resolve 的一致性问题。
+
 ## 尚未形成的结论
 
-- source-aware 尚未完成 6/6；目前确认 544、549、769、771 四题通过。
+- source-aware 尚未完成 6/6；目前确认 544、549、769、771、610 五题通过。
 - fresh Skill-only 尚未重跑；不能用旧 4/6 代表候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
