@@ -37,8 +37,9 @@
 | 任务 | 模式 | 官方结果 | HAR | 结果目录 | 结论 |
 |---|---|---:|---|---|---|
 | 544 | source-aware | 1.0 | 1340 entries；一次 PageBuilder iframe body 抓取失败，因此 `complete: false` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/544/` | 复合编辑器的 child frame 输入与保存成立 |
-| 544 | fresh Skill-only | 0.0 | 2787 entries；一个 PageBuilder render body 未在 5 秒内完成，且一个 Agent 打开的 child tab 为 late attach，因此 `complete: false` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/544/` | 独立 Agent 正确统计三条四星评论并完成商品保存，但自行选择主 Description；官方要求的 Short Description 缺失，与旧 fresh 基线失败归因一致 |
+| 544 | fresh Skill-only | 0.0 | 1775 entries；Agent 打开的 child tab 为 late attach，因此 `complete: false` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/544/` | 独立 Agent正确统计三条四星评论；Products JSON 已返回数据，但网格只呈现空行且 loading mask 持续覆盖，未进入商品编辑与保存 |
 | 549 | source-aware | 1.0 | 1837 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware-r2/549/` | 新属性与唯一 `XXXL + Green` 变体均由官方网络 evaluator 接受 |
+| 549 | fresh Skill-only | 0.0 | 378 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/fresh-skill-only/549/` | 新 Agent 在重建后的正式基线中遇到相同 Products 空行/loading mask，停止重复动作且未产生商品 mutation |
 | 769 | source-aware | 1.0 | 4004 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/769/` | 五个尺寸 SKU 均由独立导航、填写、保存和页面事实核验更新为 478，官方 mutation evaluator 接受 |
 | 771 | source-aware | 1.0 | 1049 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/771/` | 两条目标评论通过 Status 与 Save Review 更新，重新打开后均为 Approved；普通 Locator click 在候选版中生效 |
 | 610 | source-aware | 1.0 | 89 entries；`complete: true` | `/tmp/agent-logs/ab/webarena-api-convergence/source-aware/610/` | AX/ref 完成发帖后在同一新帖继续评论，两个连续 POST 均被官方 evaluator 接受 |
@@ -46,7 +47,9 @@
 
 所有完成项以目录中的 `eval_result.json` 为准，不以页面成功提示或 Agent 自报成功代替。后续结果必须继续写入本台账并绑定候选 commit；如果同一任务在后续 commit 失败，先和这里的 commit、任务模式、evaluator checksum 与完整操作边界比较，再判断是产品回归、Agent 规划差异还是外部环境变化。
 
-fresh 544 的第一次派工没有计入结果：该 Agent 未按候选 Skill 发现 Codex deferred `mcp__node_repl__js`，擅自用多次 `node --input-type=module` shell 进程代替托管 kernel。该无效 provenance 的 HAR 与失败响应保留在 `/tmp/agent-logs/ab/webarena-api-convergence/invalid-shell-fallback/544/`。站点重置后，正式轮次使用新的无历史 Agent，并在实际开始前确认浏览器代码只运行于同一个 managed Node REPL。
+fresh 544 的第一次派工没有计入结果：该 Agent 未按候选 Skill 发现 Codex deferred `mcp__node_repl__js`，擅自用多次 `node --input-type=module` shell 进程代替托管 kernel。该无效 provenance 的 HAR 与失败响应保留在 `/tmp/agent-logs/ab/webarena-api-convergence/invalid-shell-fallback/544/`。后续 Agent 均在实际开始前确认浏览器代码只运行于同一个 managed Node REPL。
+
+最初使用 `webarena-verified env start --url <env-control>` 被误当成站点重置；官方实现表明它只调用 `/start` 启动服务，不恢复数据库。真正的本地 reset 语义是 `env start --site shopping_admin` 删除并重建 Colima 容器。重建前的 fresh 544 与 549 运行因此移入 `/tmp/agent-logs/ab/webarena-api-convergence/invalid-dirty-environment/`，不计成绩；表中两条 fresh 结果都来自重建后的镜像基线。
 
 ## 549 的通过边界
 
@@ -107,8 +110,12 @@ Magento 商品 keyword search 对包含 `LumaTech™` 的名称返回 0 条；Na
 
 610 的 AX state 明确呈现关闭的原生 Forum select 及 `option "books"`，但同一时刻 `getByRole("option", { name: "books", exact: true }).inspect()` 等待 30 秒后报 locator 未匹配。任务最终使用已有 observation 的 combobox ref 和官方 source-aware forum 值完成，没有新增选择器或特判。该差异属于 AX 渲染与 Locator resolve 的一致性问题。
 
+### Magento Products 数据已返回但 UI 未完成渲染
+
+重建容器后的 fresh 544 与 549 都在 Products 页观察到 2040 records、200 个 `tr.data-row`，但所有行高度为 0、无单元格文本，两个 `admin__data-grid-loading-mask` 持续可见。HAR 中对应 `mui/index/render?namespace=product_listing` 返回 HTTP 200、16639-byte JSON，包含 2040 条总数和当前页真实商品 items；因此不能把它归为后端、Elasticsearch 或 Agent 搜索词错误。当前证据指向 Magento 前端把已返回数据应用到 Knockout grid 的链路未完成，尚未区分站点 JS、持久 Chrome/profile 状态或 AB action/observation settle 对页面时序的影响。
+
 ## 尚未形成的结论
 
 - source-aware 六题已全部完成并取得官方 6/6；这证明候选 API 在知情操作下保留了旧基线的六类复杂任务能力，不外推为全部 Hard 258 的通过率。
-- fresh Skill-only 已完成 544，当前 0/1；其失败归因与旧基线一致。其余五题尚未完成，不能用旧 4/6 或当前单题外推候选成绩。
+- fresh Skill-only 已完成 544、549，当前 0/2；两题都受重建后 Products grid 未完成渲染影响，不能沿用旧基线的字段语义/集合规划归因。其余四题尚未完成，不能用旧 4/6 或当前两题外推候选成绩。
 - 上述超时与 origin 问题已经有复杂页面证据，但尚未修复和回归；在完成剩余 source-aware 题目前不为单题改动生产语义。
