@@ -248,6 +248,7 @@ export class Locator {
         ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
         : {}),
     });
+    this.#ax.applyActionResult(result.selection);
     if (write === "diff") {
       if (result.selection.observation) {
         await this.#ax.write(result.selection.observation);
@@ -372,6 +373,7 @@ export class Locator {
         ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
         : {}),
     });
+    this.#ax.applyActionResult(result);
     if (write === "diff") {
       if (result.observation) {
         await this.#ax.write(result.observation);

@@ -214,6 +214,10 @@ export class AX {
         return this.#lastPresentedState;
     }
     /** @internal */
+    applyActionResult(result) {
+        this.#tab.applyActionResult(result);
+    }
+    /** @internal */
     async presentActionObservationOutcome(result) {
         const outcome = result.observationOutcome;
         const failure = outcome.error
@@ -267,6 +271,7 @@ export class AX {
     }
     async #perform(refId, write, action) {
         const result = await action(this.#ref(refId));
+        this.applyActionResult(result);
         if (write === "diff") {
             if (result.observation) {
                 await this.#presentState(result.observation);

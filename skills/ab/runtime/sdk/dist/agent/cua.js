@@ -36,6 +36,7 @@ export class CUA {
                 ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } }
                 : {}),
         });
+        this.#ax.applyActionResult(result);
         if (result.observation)
             await this.#ax.write(result.observation);
         return result;

@@ -198,6 +198,18 @@ export class Tab {
     get active() {
         return this.#active;
     }
+    /**
+     * Applies the final browser-owned URL carried by an Agent action without a
+     * second RPC or a presentation side effect.
+     *
+     * Design evidence:
+     * `docs/evidence/20260902__agent-tab-action-metadata-coherence__@codex.md`.
+     *
+     * @internal
+     */
+    applyActionResult(result) {
+        this.#url = result.navigation.afterUrl;
+    }
     async refresh(options = {}) {
         const info = await this.#client.request("tabs.get", {}, {
             target: { tabId: this.id },

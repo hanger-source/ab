@@ -28,6 +28,7 @@ try {
       <label>Short name <input aria-label="Short name" maxlength="15"></label>
       <button onclick="result.textContent = 'Saved: ' + document.querySelector('input').value">Continue</button>
       <button onclick="result.textContent = 'Silent action completed'">Silent action</button>
+      <button onclick="history.pushState({}, '', '#silent-navigation'); result.textContent = 'Silent navigation completed'">Silent navigate action</button>
       <button onclick="history.pushState({}, '', '#after-action'); result.textContent = 'Navigated action completed'">Navigate action</button>
       <output id="result"></output>
     `));
@@ -91,6 +92,21 @@ try {
     assert.equal(
       await taskTab.playwright.getByText("Silent action completed", { exact: true }).textContent(),
       "Silent action completed",
+    );
+
+    const beforeSilentNavigationPresentations = presented.filter((value) => value.kind === "ax").length;
+    const silentNavigationResult = await taskTab.playwright.getByRole("button", {
+      name: "Silent navigate action",
+      exact: true,
+    }).click({ write: "none" });
+    assert.equal(silentNavigationResult.navigation.changed, true);
+    assert.match(silentNavigationResult.navigation.afterUrl, /#silent-navigation$/);
+    assert.match(taskTab.url, /#silent-navigation$/);
+    assert.deepEqual(silentNavigationResult.observationOutcome, { status: "notRequested" });
+    assert.equal(silentNavigationResult.observation, null);
+    assert.equal(
+      presented.filter((value) => value.kind === "ax").length,
+      beforeSilentNavigationPresentations,
     );
 
     await taskTab.playwright.getByRole("button", {

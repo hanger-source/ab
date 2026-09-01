@@ -1,5 +1,6 @@
 import { inspect } from "node:util";
 import { CUA } from "../actions/cua.js";
+import type { ActionResult } from "../actions/result.js";
 import {
   Screenshot,
   type ScreenshotScale,
@@ -338,6 +339,19 @@ export class Tab {
 
   get active(): boolean {
     return this.#active;
+  }
+
+  /**
+   * Applies the final browser-owned URL carried by an Agent action without a
+   * second RPC or a presentation side effect.
+   *
+   * Design evidence:
+   * `docs/evidence/20260902__agent-tab-action-metadata-coherence__@codex.md`.
+   *
+   * @internal
+   */
+  applyActionResult(result: Pick<ActionResult, "navigation">): void {
+    this.#url = result.navigation.afterUrl;
   }
 
   async refresh(options: OperationOptions = {}): Promise<Tab> {
