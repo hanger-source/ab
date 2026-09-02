@@ -65,6 +65,7 @@ If the click can open a dialog, download, file chooser, or new tab, open the mat
 Agent code uses the opener-scoped `expectPopup()` composition:
 
 ```js
+await browser.documentation("tabs");
 const child = await tab.expectPopup(
   () => trigger.click(),
   { timeoutMs: 10_000 },

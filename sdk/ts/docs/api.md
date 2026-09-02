@@ -83,6 +83,8 @@ tab.expectPopup(action, { timeoutMs?, signal? }) // Agent facade
 tab.close(options?)
 ```
 
+Before the first Agent `tab.expectPopup()` or `tab.resources.popups()` call, successfully present `await browser.documentation("tabs")`. Core popup watchers do not use the Agent documentation gate.
+
 `Tab.id` is the Chrome target id and remains stable across navigation. `Tab.ownership` is `"available" | "owned" | "other"` relative to the current client. Discovery and read-only observation do not acquire a target. `tabs.open()` owns the created target; `tabs.acquire()`/`tab.acquire()` atomically claim an available existing target. Mutations require `owned` server-side and fail with `target_in_use` or `target_not_acquired` rather than switching targets. A task must not close a tab it did not create unless the user explicitly asked.
 
 `Tab.active` is the activity snapshot captured when that `Tab` descriptor was returned; it is not a live selector and does not choose a later action target. `tab.activate()` only makes a tab visible. Pointer, keyboard, focus, and form-input actions already acquire the Rust Browser Owner's physical-input lease and activate the exact tab named by the call before dispatch.

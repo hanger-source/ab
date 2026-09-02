@@ -60,6 +60,7 @@ The tab initially selected by a user, coordinator, or benchmark is the task entr
 If an operation is expected to open a popup, arm the opener-scoped watcher before the trigger:
 
 ```js
+await browser.documentation("tabs");
 const child = await tab.expectPopup(
   () => tab.playwright.getByRole("link", { name: "Open", exact: true }).click(),
   { timeoutMs: 10_000 },
@@ -69,7 +70,7 @@ createdByTask.add(child.id);
 
 `expectPopup()` subscribes before the action, waits for a ready root page whose exact `openerId` is this tab, and returns that child with the opener's lease already inherited. It does not pick the last, active, or same-origin tab. Inspect its URL/title and fresh AX state before continuing.
 
-For lower-level orchestration, use `const watcher = await tab.resources.popups()` before the action, then `await watcher.waitForPopup()` and dispose it. Do not replace either form with a fixed sleep and before/after tab-list diff; a fast or not-yet-ready target can be missed.
+The same successfully presented tabs topic unlocks the lower-level Agent resource. Use `const watcher = await tab.resources.popups()` before the action, then `await watcher.waitForPopup()` and dispose it. Do not replace either form with a fixed sleep and before/after tab-list diff; a fast or not-yet-ready target can be missed.
 
 ## Navigation operations
 

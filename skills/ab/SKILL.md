@@ -66,7 +66,14 @@ let tab = candidate
 
 Track tabs created for the task. Acquiring an existing tab grants mutation authority while this client is connected; it does not make the tab disposable user content. Close only task-created tabs or tabs the user explicitly asked to close. `browser.disconnect()` releases this client's target leases, observations, and event resources; it does not close tabs, Chrome, or the daemon.
 
-A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits the opener's target lease. When an action is expected to open one, use `tab.expectPopup(() => action())`; it arms target observation before the action and returns the exact ready child. Do not use sleep plus `tabs.list()` diff, assume the child is last/active, or touch unrelated pre-existing tabs.
+A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits the opener's target lease. Before the first popup operation, present the tabs topic, then arm target observation before the action:
+
+```ts
+await browser.documentation("tabs");
+const child = await tab.expectPopup(() => action());
+```
+
+`expectPopup()` returns the exact ready child. Do not use sleep plus `tabs.list()` diff, assume the child is last/active, or touch unrelated pre-existing tabs.
 
 Read [browser and task lifecycle](references/lifecycle.md) when reusing tabs, recovering from an interrupted JavaScript kernel, or coordinating more than one task. Read [authentication](references/authentication.md) before handling login, SSO, CAPTCHA, or Chrome-owned authentication UI.
 

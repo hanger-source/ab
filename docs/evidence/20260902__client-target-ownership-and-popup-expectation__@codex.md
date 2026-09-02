@@ -64,6 +64,12 @@ const popup = await tab.expectPopup(
 
 这是“预先建立 Resource → 执行动作 → 等准确 child → 返回 Tab”的组合，不是让 click 猜页面后果。动作可能不产生 popup；超时就报告 expectation 没满足，不改用最后一个 tab。
 
+### Agent 文档门禁与主路径一致
+
+Agent `tab.expectPopup()` 和低层 `tab.resources.popups()` 在建立 watcher 前都会要求 tabs topic 已成功呈现。该门禁让调用方先看到 opener identity、lease 继承和 cleanup 规则；Core popup watcher 不使用 Agent 文档门禁。
+
+`expectPopup()` 成为主 Skill 推荐路径后，主文一度直接展示调用，却没有先展示 `await browser.documentation("tabs")`。因此完整遵循主 Skill 的首次调用仍会得到 `documentation_required`；这不是 popup 能力或页面 case，而是 Skill 给出的调用序列与 Agent facade 契约不一致。主 Skill、tabs/navigation reference 和 API 条目现在都在首次 popup 操作前明确呈现同一个 topic，不把完整 popup API 目录复制进主文，也不改变 Runtime 行为。
+
 ## 明确不采用
 
 - 不向 `AXState` 添加 URL。URL 属于 Tab/ActionResult；observation 继续表达 document/viewport/AX identity。
