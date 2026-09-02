@@ -419,15 +419,18 @@ describe('NodeReplKernelManager', () => {
         ].join('\n'),
       );
       expect(result.status).toBe('ok');
-      expect(texts(result)).toEqual([
+      const output = texts(result);
+      expect(output.slice(0, 5)).toEqual([
         '1n',
         '<ref *1> { self: [Circular *1] }',
         '[Function: named]',
         'Symbol(token)',
         'Error: expected',
-        '[Function (anonymous)]',
-        '{}',
       ]);
+      // Node 26 names proxy values explicitly; earlier supported Node releases
+      // format the same trap-safe targets without the Proxy wrapper.
+      expect(['[Function (anonymous)]', 'Proxy([Function (anonymous)])']).toContain(output[5]);
+      expect(['{}', 'Proxy({})']).toContain(output[6]);
     },
     TEST_TIMEOUT,
   );
