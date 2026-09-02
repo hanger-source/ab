@@ -91,6 +91,8 @@ await tab.ax.write("diff");
 
 `write("state")` displays bounded untrusted page content, establishes the last presented observation for this Agent session and tab, and returns that exact `AXState`. `state.id`, the Presenter observation id, and the baseline used by the next short-ref action are the same identity; do not call `get()` after `write()` to obtain it. Short refs are only a convenience: every action sends the exact observation id and ref id to Rust. Actions do not capture or display a post-action state. At the next decision boundary, choose the cheapest explicit fact: a URL/load/element/resource wait, `write("diff")`, or a complete `write("state")`. Never guess old refs.
 
+The live page URL is `tab.url` (refresh tab metadata when needed); `AXState` deliberately has no `url` property because it owns observation/document identity rather than navigation state. Common ref and Locator mutations are `click`, `fill`, `type`, `press`, `hover`, `focus`, `scrollIntoView`, `dragTo`, and `setFiles`. The AB method is `scrollIntoView()`, not Playwright's `scrollIntoViewIfNeeded()`.
+
 Use `get()` when code needs the typed object without showing it or changing the presented baseline:
 
 ```ts

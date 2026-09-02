@@ -134,9 +134,14 @@ coreTab.ax.snapshot({
 })
 
 state.text
+tab.url // page navigation state; AXState intentionally has no url
 state.refs()
 state.ref("e7")
 state.dispose(options?)
+state.complete
+state.sources.capturedFrameCount
+state.sources.frameCount
+state.sources.gaps
 
 ref.click({ button?, clickCount?, observe?, observation?, timeoutMs?, signal? })
 ref.doubleClick(options?)
@@ -236,7 +241,7 @@ view.state?: AXState
 view.screenshot?: Screenshot
 ```
 
-When AX and screenshot are both requested, Rust captures and validates them as one document/frame/viewport transaction. Agent `get/write("both")` uses this exact primitive; neither facade composes two calls client-side.
+When AX and screenshot are both requested, Rust captures and validates them as one document/frame/viewport transaction. Agent `get/write("both")` uses this exact primitive; neither facade composes two calls client-side. Core returns every consistency conflict directly. Agent `get/write("state" | "both")` may repeat one side-effect-free capture within the original timeout budget; it never retries an action.
 
 ## Locators
 

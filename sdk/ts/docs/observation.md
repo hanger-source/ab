@@ -37,7 +37,7 @@ Interactive mode removes most non-interactive text; full mode does not. `surface
 
 ## Atomic AX plus pixels
 
-Use `tab.observe({ ax, screenshot: true })` or Agent `get/write("both")`. Rust captures AX/DOM/layout and pixels in one transaction, then checks document generation, frame topology, viewport, scroll, and DPR again. Any identity change rejects the whole operation with `observation_consistency_error`; AB never returns a state from one page moment and a screenshot from another.
+Use `tab.observe({ ax, screenshot: true })` or Agent `get/write("both")`. Rust captures AX/DOM/layout and pixels in one transaction, then checks document generation, frame topology, viewport, scroll, and DPR again. Any identity change rejects the whole Core operation with `observation_consistency_error`; AB never returns a state from one page moment and a screenshot from another. The Agent facade may repeat this side-effect-free capture once within the caller's original timeout budget. A second mismatch remains an explicit failure.
 
 ## Diff
 

@@ -40,7 +40,7 @@ Only use CSS when the page lacks a stable semantic identity. Only use evaluate/C
 
 ## Observation failures
 
-If atomic `both` capture returns `observation_consistency_error`, the document, frame topology, viewport, scroll, DPR, or layout identity changed during capture. Retry a fresh atomic capture after the page settles; do not combine an old AX state with a new screenshot.
+Core observation returns `observation_consistency_error` when document, frame topology, viewport, scroll, DPR, or layout identity changes during capture. Agent `ax.get/write("state" | "both")` absorbs one such side-effect-free race within the original timeout budget; a surfaced error therefore means the second transaction also changed. Wait for a meaningful page-ready fact before trying again. Never combine an old AX state with a new screenshot.
 
 If `complete` is false or `truncated` is true, narrow the question or request a larger/full observation. Do not infer absence from incomplete coverage.
 

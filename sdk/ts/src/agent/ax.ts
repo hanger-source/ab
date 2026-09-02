@@ -17,6 +17,7 @@ import type { Presenter } from "./presentation.js";
 
 /** @internal */
 export const OBSERVATION_MAX_CHARS = 24_000;
+const DEFAULT_OBSERVATION_TIMEOUT_MS = 30_000;
 
 export type AXContent = "state" | "screenshot" | "both";
 export type AXWriteContent = AXContent | "diff";
@@ -76,19 +77,24 @@ export class AX {
     }
     if (content === "state") {
       const snapshot = snapshotOptions(options);
-      return this.#track(await this.#tab.ax.snapshot(snapshot), captureShape(snapshot));
+      const state = await captureWithConsistencyRetry(options, (attempt) =>
+        this.#tab.ax.snapshot(snapshotOptions(attempt))
+      );
+      return this.#track(state, captureShape(snapshot));
     }
     if (content === "screenshot") {
       return this.#tab.screenshot({ ...options, scale: options.scale ?? "css" });
     }
-    const observation = await this.#tab.observe({
-      ax: snapshotOptions(options),
-      screenshot: true,
-      fullPage: options.fullPage ?? false,
-      scale: options.scale ?? "css",
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
+    const observation = await captureWithConsistencyRetry(options, (attempt) =>
+      this.#tab.observe({
+        ax: snapshotOptions(attempt),
+        screenshot: true,
+        fullPage: attempt.fullPage ?? false,
+        scale: attempt.scale ?? "css",
+        ...(attempt.timeoutMs === undefined ? {} : { timeoutMs: attempt.timeoutMs }),
+        ...(attempt.signal === undefined ? {} : { signal: attempt.signal }),
+      })
+    );
     if (observation.state) {
       this.#track(observation.state, captureShape(snapshotOptions(options)));
     }
@@ -430,6 +436,27 @@ export class AX {
     for (const state of this.#ownedStates) {
       if (state.disposed) this.#ownedStates.delete(state);
     }
+  }
+}
+
+async function captureWithConsistencyRetry<T>(
+  options: WriteOptions,
+  capture: (attempt: WriteOptions) => Promise<T>,
+): Promise<T> {
+  const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_OBSERVATION_TIMEOUT_MS);
+  try {
+    return await capture(options);
+  } catch (error) {
+    if (
+      !(error instanceof ABError)
+      || error.kind !== "observation_consistency_error"
+      || options.signal?.aborted
+    ) {
+      throw error;
+    }
+    const remaining = Math.floor(deadline - Date.now());
+    if (remaining <= 0) throw error;
+    return capture({ ...options, timeoutMs: remaining });
   }
 }
 

@@ -394,7 +394,7 @@ popup 是 target lifecycle 事实，不由 click 或下一份 AX observation 猜
 
 computed styles 只采集判断可见性和交互性所需字段，例如 display、visibility、opacity、pointer-events、cursor、overflow。观察引擎不抓取整份 CSS，也不把全 DOM 原样塞给 Agent。
 
-Core `tab.observe({ ax, screenshot: true })` 以及 Agent `tab.ax.get/write("both")` 使用同一 Rust capture transaction：AX/DOM/layout 规范化并登记 `AXState` 后，在同一 target/document/viewport 约束内取得 screenshot；结束前再次核对 document generation、viewport、scroll 与 DPR。任一 identity 改变都使整个组合调用失败，不返回来自两个页面时刻的部分结果。
+Core `tab.observe({ ax, screenshot: true })` 以及 Agent `tab.ax.get/write("both")` 使用同一 Rust capture transaction：AX/DOM/layout 规范化并登记 `AXState` 后，在同一 target/document/viewport 约束内取得 screenshot；结束前再次核对 document generation、frame topology、viewport、scroll 与 DPR。任一 identity 改变都使单次组合调用失败，不返回来自两个页面时刻的部分结果。Core 原样暴露这次失败；Agent facade 只对 `observation_consistency_error` 的纯读取捕获在调用方原始 deadline 内重做一次，第二次不一致继续硬失败。mutation 不进入这条重捕获路径。
 
 ### 7.2 规范化节点
 
