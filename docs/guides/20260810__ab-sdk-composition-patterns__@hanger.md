@@ -15,7 +15,9 @@ const tabs = await browser.tabs.list();
 ## 陌生页面先观察
 
 ```js
-const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
+const tab = tabs[0]
+  ? await browser.tabs.acquire(tabs[0].id)
+  : await browser.tabs.open("https://example.com");
 await tab.ax.write("state", { mode: "interactive", maxChars: 24_000 });
 await tab.ax.click("e4");
 await tab.ax.write("diff");

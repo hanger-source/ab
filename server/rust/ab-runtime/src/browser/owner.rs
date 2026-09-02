@@ -1,5 +1,6 @@
 use super::session_manager::SessionManager;
 use super::target_lane::{TargetLane, TargetState};
+use super::target_leases::{TargetLeases, TargetOwnership};
 use crate::error::{AbError, AbResult};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -16,15 +17,22 @@ pub struct BrowserOwner {
     sessions: Arc<SessionManager>,
     lanes: Mutex<LaneRegistry>,
     input_surface: Arc<Mutex<()>>,
+    target_leases: TargetLeases,
+    target_lease_gate: Mutex<()>,
 }
 
 impl BrowserOwner {
     pub async fn connect(ws_url: &str) -> AbResult<Arc<Self>> {
-        Ok(Arc::new(Self {
-            sessions: SessionManager::connect(ws_url).await?,
+        let sessions = SessionManager::connect(ws_url).await?;
+        let owner = Arc::new(Self {
+            sessions,
             lanes: Mutex::new(LaneRegistry::default()),
             input_surface: Arc::new(Mutex::new(())),
-        }))
+            target_leases: TargetLeases::default(),
+            target_lease_gate: Mutex::new(()),
+        });
+        owner.spawn_target_lifecycle();
+        Ok(owner)
     }
 
     pub fn sessions(&self) -> Arc<SessionManager> {
@@ -33,6 +41,43 @@ impl BrowserOwner {
 
     pub fn subscribe_disconnected(&self) -> watch::Receiver<bool> {
         self.sessions.subscribe_disconnected()
+    }
+
+    pub async fn open_target(
+        &self,
+        client_id: &str,
+    ) -> AbResult<super::session_manager::TargetSession> {
+        let _gate = self.target_lease_gate.lock().await;
+        let target = self.sessions.open_tab("about:blank").await?;
+        self.target_leases
+            .acquire(client_id, &target.target_id)
+            .await?;
+        Ok(target)
+    }
+
+    pub async fn acquire_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
+        let _gate = self.target_lease_gate.lock().await;
+        let target = self.sessions.target(target_id).await?;
+        if let Some(opener_id) = target.opener_id.as_deref() {
+            self.target_leases.inherit(opener_id, target_id).await;
+        }
+        self.target_leases.acquire(client_id, target_id).await
+    }
+
+    pub async fn require_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
+        let target = self.sessions.target(target_id).await?;
+        if let Some(opener_id) = target.opener_id.as_deref() {
+            self.target_leases.inherit(opener_id, target_id).await;
+        }
+        self.target_leases.require(client_id, target_id).await
+    }
+
+    pub async fn target_ownership(&self, client_id: &str, target_id: &str) -> TargetOwnership {
+        self.target_leases.ownership(client_id, target_id).await
+    }
+
+    pub async fn cleanup_client(&self, client_id: &str) {
+        self.target_leases.release_client(client_id).await;
     }
 
     pub async fn lock_target(&self, target_id: &str) -> AbResult<OwnedMutexGuard<TargetState>> {
@@ -107,7 +152,8 @@ impl BrowserOwner {
         Ok(guard)
     }
 
-    pub async fn close_target(&self, target_id: &str) -> AbResult<()> {
+    pub async fn close_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
+        self.require_target(client_id, target_id).await?;
         let lane = {
             let mut registry = self.lanes.lock().await;
             registry.unavailable.insert(target_id.to_owned());
@@ -121,6 +167,39 @@ impl BrowserOwner {
         self.sessions.close_tab(target_id).await?;
         self.lanes.lock().await.lanes.remove(target_id);
         Ok(())
+    }
+
+    fn spawn_target_lifecycle(self: &Arc<Self>) {
+        let owner = Arc::clone(self);
+        let mut lifecycle = self.sessions.subscribe_lifecycle();
+        tokio::spawn(async move {
+            loop {
+                match lifecycle.recv().await {
+                    Ok(super::session_manager::SessionLifecycle::Attached(target))
+                        if target.target_id == target.root_target_id =>
+                    {
+                        if let Some(opener_id) = target.opener_id.as_deref() {
+                            owner
+                                .target_leases
+                                .inherit(opener_id, &target.target_id)
+                                .await;
+                        }
+                    }
+                    Ok(super::session_manager::SessionLifecycle::Detached {
+                        root_target_id,
+                        is_root: true,
+                        ..
+                    }) => {
+                        owner.target_leases.target_closed(&root_target_id).await;
+                        let mut lanes = owner.lanes.lock().await;
+                        lanes.unavailable.insert(root_target_id.clone());
+                        lanes.lanes.remove(&root_target_id);
+                    }
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
     }
 }
 

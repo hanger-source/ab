@@ -66,9 +66,11 @@ Trace stages contain identities, timing, method, target, status and error class,
 ```ts
 browser.tabs.list(options?)
 browser.tabs.get(targetId, options?)
+browser.tabs.acquire(targetId, options?)
 browser.tabs.open(url?, { waitUntil?, timeoutMs?, signal? })
 
 tab.refresh(options?)
+tab.acquire(options?)
 tab.goto(url, { waitUntil?, timeoutMs?, signal? })
 tab.activate(options?)
 tab.reload(options?)
@@ -77,10 +79,11 @@ tab.goForward(options?)
 tab.playwright.waitFor({ selector?, text?, state?: "attached" | "detached" | "visible" | "hidden", timeoutMs?, signal? })
 tab.playwright.waitForURL(pattern, { timeoutMs?, signal? })
 tab.playwright.waitForLoadState(state?: "domcontentloaded" | "load", { timeoutMs?, signal? })
+tab.expectPopup(action, { timeoutMs?, signal? }) // Agent facade
 tab.close(options?)
 ```
 
-`Tab.id` is the Chrome target id and remains stable across navigation. A task must not close a tab it did not create unless the user explicitly asked.
+`Tab.id` is the Chrome target id and remains stable across navigation. `Tab.ownership` is `"available" | "owned" | "other"` relative to the current client. Discovery and read-only observation do not acquire a target. `tabs.open()` owns the created target; `tabs.acquire()`/`tab.acquire()` atomically claim an available existing target. Mutations require `owned` server-side and fail with `target_in_use` or `target_not_acquired` rather than switching targets. A task must not close a tab it did not create unless the user explicitly asked.
 
 `Tab.active` is the activity snapshot captured when that `Tab` descriptor was returned; it is not a live selector and does not choose a later action target. `tab.activate()` only makes a tab visible. Pointer, keyboard, focus, and form-input actions already acquire the Rust Browser Owner's physical-input lease and activate the exact tab named by the call before dispatch.
 
@@ -418,6 +421,7 @@ tab.resources.console(options?): Promise<ConsoleObserver>
 tab.resources.dialogs(options?): Promise<DialogWatcher>
 tab.resources.downloads(options?): Promise<DownloadWatcher>
 tab.resources.fileChoosers(options?): Promise<FileChooserWatcher>
+tab.resources.popups(options?): Promise<PopupWatcher>
 
 tab.resources.initScripts({
   name: string,
@@ -434,8 +438,15 @@ registration.waitFor(predicate, options?)
 registration.refresh(options?)
 registration.assertComplete(options?)
 registration.dispose(options?)
+
+popupWatcher.waitForPopup(options?): Promise<PopupInfo>
+popupWatcher.refresh(options?)
+popupWatcher.assertComplete(options?)
+popupWatcher.dispose(options?)
 ```
+
+`PopupInfo` contains `targetId`, exact `openerId`, URL, title, and target type. Create the watcher before the triggering action; the Agent `tab.expectPopup(action)` method performs that ordering and resolves the ready child `Tab`.
 
 Every resource is owned by the current SDK client and buffered in Rust with sequence and completeness state. An init-script instance is scoped to one `sessionId + executionContextId + documentGeneration`; commands never retarget an old instance after navigation or frame detach.
 
-Core callers use the corresponding flat methods `coreTab.observeNetwork()`, `observeConsole()`, `watchDialogs()`, `watchDownloads()`, `watchFileChoosers()`, and `addInitScript()`. Agent namespaces change discoverability, not Rust resource ownership or behavior.
+Core callers use the corresponding flat methods `coreTab.observeNetwork()`, `observeConsole()`, `watchDialogs()`, `watchPopups()`, `watchDownloads()`, `watchFileChoosers()`, and `addInitScript()`. Agent namespaces change discoverability, not Rust resource ownership or behavior.

@@ -1,14 +1,14 @@
 {
   "format": 1,
   "protocolVersion": 3,
-  "buildId": "ab-runtime@0.3.0-alpha.3+38740b80c983899f",
+  "buildId": "ab-runtime@0.3.0-alpha.4+29861a6dea9cd172",
   "sdk": {
     "name": "@hanger-source/ab",
-    "version": "0.3.0-alpha.3"
+    "version": "0.3.0-alpha.4"
   },
   "native": {
     "name": "@hanger-source/ab-runtime-darwin-arm64",
-    "version": "0.3.0-alpha.3",
+    "version": "0.3.0-alpha.4",
     "platform": "darwin-arm64"
   }
 }

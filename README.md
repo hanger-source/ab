@@ -57,7 +57,9 @@ const browser = await connect();
 
 try {
   const tabs = await browser.tabs.list();
-  const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
+  const tab = tabs[0]
+    ? await browser.tabs.acquire(tabs[0].id)
+    : await browser.tabs.open("https://example.com");
 
   const state = await tab.ax.write("state", { mode: "interactive" });
   await tab.ax.click("e2");
@@ -68,7 +70,7 @@ try {
 }
 ```
 
-`browser.disconnect()` 只释放当前 SDK client 拥有的 observer、CDPSession、ElementHandle、observation 等临时资源，不关闭 daemon、Chrome 或其他 client。页面只有在调用 `tab.close()` 时才关闭。
+`tabs.list/get` 只发现共享 Chrome 中的页面。`tabs.open()` 原子拥有新 target；复用现有页面前用 `tabs.acquire(targetId)` 取得当前 client 的修改租约。另一个活跃 client 已持有时明确返回 `target_in_use`，不会抢占或切换到相似页面。`browser.disconnect()` 释放当前 SDK client 的 target 租约、observer、CDPSession、ElementHandle、observation 等临时资源，不关闭 daemon、Chrome 或其他 client。页面只有在持有租约并调用 `tab.close()` 时才关闭。
 
 ## Agent 操作面
 
@@ -78,6 +80,7 @@ try {
 - 页面专有计算使用 `tab.dev.evaluate()`；
 - 浏览器机制诊断与未覆盖 domain 使用 `tab.dev.cdp()` 取得显式 `CDPSession`；
 - `tab.resources` 中的 network、console、dialog、download、file chooser 和 init script 都是 client-owned Resource，监听必须在动作前建立。
+- 预计动作会另开页面时使用 `tab.expectPopup(() => action())`；Rust 在动作前订阅 opener-scoped target lifecycle，并把准确 child tab 连同继承的 mutation lease 返回。
 
 这些入口不是自动 fallback 链。not found、stale、hit-test、dialog、transport 与 outcome unknown 必须保留各自错误语义，SDK 不自动重放副作用动作。
 

@@ -9,6 +9,7 @@ import type {
   InitScriptRegistration,
   NetworkObserver,
   NetworkObserverOptions,
+  PopupWatcher,
 } from "../resources/index.js";
 import type { DocumentationRegistry } from "./documentation.js";
 
@@ -40,6 +41,11 @@ export class Resources {
   dialogs(options: OperationOptions = {}): Promise<DialogWatcher> {
     this.#documentation.require("console-dialogs", "tab.resources.dialogs()");
     return this.#core.watchDialogs(options);
+  }
+
+  popups(options: OperationOptions = {}): Promise<PopupWatcher> {
+    this.#documentation.require("tabs", "tab.resources.popups()");
+    return this.#core.watchPopups(options);
   }
 
   downloads(options: OperationOptions = {}): Promise<DownloadWatcher> {

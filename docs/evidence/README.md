@@ -25,3 +25,7 @@
 ## 提交关系
 
 行为提交应在提交说明中引用实验记录或场景名。纯机械重命名、格式化和不改变行为的文档修正可以直接说明影响面；一旦改变运行行为，仍按本页记录原因和场景。
+
+## 关键行为证据
+
+- [Client target ownership and popup expectation](20260902__client-target-ownership-and-popup-expectation__@codex.md)：共享 daemon 中的 target mutation lease、popup opener 继承和 race-free expectation。

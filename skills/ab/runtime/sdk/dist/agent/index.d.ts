@@ -1,4 +1,4 @@
-export { connect, Browser, Tabs, Tab, type ConnectOptions, } from "./browser.js";
+export { connect, Browser, Tabs, Tab, type ConnectOptions, type PopupExpectationOptions, } from "./browser.js";
 export { AX, type AXContent, type AXWriteContent, type WriteOptions, type RefActionOptions, type ClickActionOptions, type TypeActionOptions, } from "./ax.js";
 export { CUA, type CuaPoint, type CuaClickOptions, type CuaWheelOptions, type CuaDragOptions, } from "./cua.js";
 export { Dev } from "./dev.js";

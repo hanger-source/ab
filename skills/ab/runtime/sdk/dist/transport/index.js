@@ -20,6 +20,7 @@ export class ProtocolClient {
     #traceDropped = 0;
     #buffer = Buffer.alloc(0);
     #closed = false;
+    #closing = false;
     #onClose;
     constructor(socket, ready) {
         this.#socket = socket;
@@ -73,7 +74,7 @@ export class ProtocolClient {
         return new ProtocolClient(socket, ready);
     }
     get connected() {
-        return !this.#closed;
+        return !this.#closed && !this.#closing;
     }
     onClose(callback) {
         this.#onClose = callback;
@@ -115,7 +116,7 @@ export class ProtocolClient {
         this.#traceDropped = 0;
     }
     async request(method, params, options = {}) {
-        if (this.#closed) {
+        if (this.#closed || this.#closing) {
             throw new ABError({
                 kind: "transport_closed",
                 stage: "sdk.request",
@@ -195,16 +196,38 @@ export class ProtocolClient {
         });
     }
     async disconnect() {
-        if (this.#closed) {
+        if (this.#closed || this.#closing) {
             return;
         }
-        this.#closed = true;
-        this.#socket.end();
-        this.#failAll(new ABError({
-            kind: "client_disconnected",
-            stage: "sdk.disconnect",
-            message: "AB client disconnected",
-        }));
+        if (this.#pending.size > 0) {
+            this.#closing = true;
+            this.#closed = true;
+            this.#socket.end();
+            this.#failAll(new ABError({
+                kind: "client_disconnected",
+                stage: "sdk.disconnect",
+                message: "AB client disconnected while operations were in flight",
+            }));
+            return;
+        }
+        const release = this.request("client.release", {}, { timeoutMs: 30_000 });
+        this.#closing = true;
+        try {
+            // Graceful disconnect is an acknowledged ownership boundary: the call
+            // resolves only after Rust has released this client's resources and
+            // target leases. Abrupt EOF remains the crash-cleanup fallback. See
+            // docs/evidence/20260902__client-target-ownership-and-popup-expectation__@codex.md.
+            await release;
+        }
+        finally {
+            this.#closed = true;
+            this.#socket.end();
+            this.#failAll(new ABError({
+                kind: "client_disconnected",
+                stage: "sdk.disconnect",
+                message: "AB client disconnected",
+            }));
+        }
     }
     #accept(chunk) {
         this.#buffer = Buffer.concat([this.#buffer, chunk]);

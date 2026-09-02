@@ -10,8 +10,10 @@ List tabs first, then open the target site in the same AB profile:
 
 ```js
 let tabs = await browser.tabs.list();
-let tab = tabs.find(t => t.url.startsWith("https://app.example.com/"));
-if (!tab) tab = await browser.tabs.open("https://app.example.com/");
+const candidate = tabs.find(t => t.url.startsWith("https://app.example.com/"));
+let tab = candidate
+  ? await browser.tabs.acquire(candidate.id)
+  : await browser.tabs.open("https://app.example.com/");
 await tab.ax.write("state");
 ```
 

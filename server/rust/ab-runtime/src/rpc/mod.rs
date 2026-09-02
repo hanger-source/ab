@@ -508,15 +508,35 @@ async fn dispatch(
     if may_have_side_effect(&request) && !delayed_dispatch_marker {
         dispatch_marker.mark_started();
     }
-    let params = request.params;
+    let method = request.method.clone();
     let target_id = request
         .target
         .as_ref()
-        .and_then(|target| target.tab_id.as_deref());
+        .and_then(|target| target.tab_id.clone());
     let browser = &state.browser;
-    match request.method.as_str() {
-        "tabs.list" => Ok(json!(browser.list_tabs().await?)),
-        "tabs.get" => Ok(json!(browser.get_tab(required_target(target_id)?).await?)),
+    if request_requires_target_lease(&request) {
+        browser
+            .require_target(&client_id, required_target(target_id.as_deref())?)
+            .await?;
+    }
+    let params = request.params;
+    match method.as_str() {
+        "client.release" => {
+            state.resources.cleanup_client(&client_id).await;
+            state.browser.cleanup_client(&client_id).await;
+            Ok(json!({ "released": true }))
+        }
+        "tabs.list" => Ok(json!(browser.list_tabs(&client_id).await?)),
+        "tabs.get" => Ok(json!(
+            browser
+                .get_tab(&client_id, required_target(target_id.as_deref())?)
+                .await?
+        )),
+        "tabs.acquire" => Ok(json!(
+            browser
+                .acquire_tab(&client_id, required_target(target_id.as_deref())?)
+                .await?
+        )),
         "tabs.open" => {
             let url = required_string(&params, "url", "tabs.open")?;
             let wait_until = params
@@ -527,10 +547,16 @@ async fn dispatch(
                 .get("timeoutMs")
                 .and_then(Value::as_u64)
                 .unwrap_or(30_000);
-            Ok(json!(browser.open_tab(url, wait_until, timeout_ms).await?))
+            Ok(json!(
+                browser
+                    .open_tab(&client_id, url, wait_until, timeout_ms)
+                    .await?
+            ))
         }
         "tab.close" => {
-            browser.close_tab(required_target(target_id)?).await?;
+            browser
+                .close_tab(&client_id, required_target(target_id.as_deref())?)
+                .await?;
             Ok(json!({ "closed": true }))
         }
         "tab.navigate" => {
@@ -541,7 +567,7 @@ async fn dispatch(
                 .unwrap_or("domcontentloaded");
             browser
                 .navigate(
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     url,
                     wait_until,
                     request_deadline,
@@ -561,7 +587,12 @@ async fn dispatch(
             )?;
             Ok(json!(
                 browser
-                    .screenshot(&client_id, required_target(target_id)?, full_page, scale)
+                    .screenshot(
+                        &client_id,
+                        required_target(target_id.as_deref())?,
+                        full_page,
+                        scale
+                    )
                     .await?
             ))
         }
@@ -602,7 +633,7 @@ async fn dispatch(
                 browser
                     .observe(
                         &client_id,
-                        required_target(target_id)?,
+                        required_target(target_id.as_deref())?,
                         ax,
                         screenshot,
                         full_page,
@@ -611,8 +642,16 @@ async fn dispatch(
                     .await?
             ))
         }
-        "tab.frames" => Ok(json!(browser.frames(required_target(target_id)?).await?)),
-        "tab.realms" => Ok(json!(browser.realms(required_target(target_id)?).await?)),
+        "tab.frames" => Ok(json!(
+            browser
+                .frames(required_target(target_id.as_deref())?)
+                .await?
+        )),
+        "tab.realms" => Ok(json!(
+            browser
+                .realms(required_target(target_id.as_deref())?)
+                .await?
+        )),
         "observation.snapshot" => {
             let options = serde_json::from_value(params).map_err(|error| {
                 AbError::new(
@@ -623,7 +662,7 @@ async fn dispatch(
             })?;
             Ok(json!(
                 browser
-                    .snapshot(&client_id, required_target(target_id)?, options)
+                    .snapshot(&client_id, required_target(target_id.as_deref())?, options)
                     .await?
             ))
         }
@@ -638,7 +677,7 @@ async fn dispatch(
             browser
                 .perform_ref_action(
                     &client_id,
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     &params,
                     request_deadline,
                     &dispatch_marker,
@@ -649,7 +688,7 @@ async fn dispatch(
             browser
                 .cua(
                     &client_id,
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     &params,
                     request_deadline,
                     &dispatch_marker,
@@ -667,7 +706,7 @@ async fn dispatch(
             browser
                 .locator_execute(
                     &client_id,
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     locator,
                     request_deadline,
                     &dispatch_marker,
@@ -684,7 +723,11 @@ async fn dispatch(
             })?;
             Ok(json!(
                 browser
-                    .create_element_from_locator(&client_id, required_target(target_id)?, locator,)
+                    .create_element_from_locator(
+                        &client_id,
+                        required_target(target_id.as_deref())?,
+                        locator,
+                    )
                     .await?
             ))
         }
@@ -695,7 +738,7 @@ async fn dispatch(
                 browser
                     .create_element_from_ref(
                         &client_id,
-                        required_target(target_id)?,
+                        required_target(target_id.as_deref())?,
                         observation_id,
                         ref_id,
                     )
@@ -765,7 +808,7 @@ async fn dispatch(
             let session_id = params.get("sessionId").and_then(Value::as_str);
             browser
                 .evaluate(
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     expression,
                     frame_id,
                     context_id,
@@ -774,15 +817,27 @@ async fn dispatch(
                 )
                 .await
         }
-        "tab.activate" => browser.activate(required_target(target_id)?).await,
-        "tab.reload" => browser.reload(required_target(target_id)?).await,
-        "tab.goBack" => browser.history(required_target(target_id)?, -1).await,
-        "tab.goForward" => browser.history(required_target(target_id)?, 1).await,
+        "tab.activate" => {
+            browser
+                .activate(required_target(target_id.as_deref())?)
+                .await
+        }
+        "tab.reload" => browser.reload(required_target(target_id.as_deref())?).await,
+        "tab.goBack" => {
+            browser
+                .history(required_target(target_id.as_deref())?, -1)
+                .await
+        }
+        "tab.goForward" => {
+            browser
+                .history(required_target(target_id.as_deref())?, 1)
+                .await
+        }
         "tab.waitFor" => {
             browser
                 .wait_for(
                     &client_id,
-                    required_target(target_id)?,
+                    required_target(target_id.as_deref())?,
                     &params,
                     request_deadline,
                 )
@@ -791,7 +846,11 @@ async fn dispatch(
         "tab.waitForURL" => {
             let pattern = required_string(&params, "url", "tab.waitForURL")?;
             browser
-                .wait_for_url(required_target(target_id)?, pattern, request_deadline)
+                .wait_for_url(
+                    required_target(target_id.as_deref())?,
+                    pattern,
+                    request_deadline,
+                )
                 .await
         }
         "tab.waitForLoadState" => {
@@ -800,7 +859,11 @@ async fn dispatch(
                 .and_then(Value::as_str)
                 .unwrap_or("load");
             browser
-                .wait_for_load_state(required_target(target_id)?, load_state, request_deadline)
+                .wait_for_load_state(
+                    required_target(target_id.as_deref())?,
+                    load_state,
+                    request_deadline,
+                )
                 .await
         }
         "resource.open" => {
@@ -811,7 +874,7 @@ async fn dispatch(
                     .resources
                     .open(
                         &client_id,
-                        Some(required_target(target_id)?),
+                        Some(required_target(target_id.as_deref())?),
                         kind,
                         &resource_params,
                         outbound,
@@ -856,7 +919,7 @@ async fn dispatch(
         _ => Err(AbError::new(
             "method_not_found",
             "request.dispatch",
-            format!("AB method {} does not exist", request.method),
+            format!("AB method {method} does not exist"),
         )),
     }
 }
@@ -990,6 +1053,28 @@ fn may_have_side_effect(request: &Request) -> bool {
             .and_then(Value::as_str)
             .is_none_or(action_operation_has_side_effect),
         _ => true,
+    }
+}
+
+fn request_requires_target_lease(request: &Request) -> bool {
+    match request.method.as_str() {
+        "tab.close" | "tab.navigate" | "tab.evaluate" | "tab.activate" | "tab.reload"
+        | "tab.goBack" | "tab.goForward" | "cua.perform" => true,
+        "action.perform" => request
+            .params
+            .get("action")
+            .and_then(Value::as_str)
+            .is_none_or(action_operation_has_side_effect),
+        "locator.execute" => request
+            .params
+            .get("operation")
+            .and_then(Value::as_str)
+            .is_none_or(action_operation_has_side_effect),
+        "resource.open" => matches!(
+            request.params.get("kind").and_then(Value::as_str),
+            Some("cdp" | "dialog" | "fileChooser" | "initScript")
+        ),
+        _ => false,
     }
 }
 

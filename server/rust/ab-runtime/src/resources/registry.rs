@@ -3,6 +3,7 @@ use super::download::{forward_download_events, DownloadStore};
 use super::events::{domains_for, forward_events};
 use super::init_scripts::forward_init_script_events;
 use super::network::{BodyKey, NetworkBodyStore};
+use super::popup::forward_popup_events;
 use super::state::ResourceState;
 use super::ClientOutbound;
 use crate::artifacts::ArtifactStore;
@@ -63,6 +64,7 @@ enum ResourceBackend {
     Dialog,
     Download,
     InitScript,
+    Popup,
 }
 
 pub struct ResourceRegistry {
@@ -246,6 +248,44 @@ impl ResourceRegistry {
             return Ok(descriptor);
         }
 
+        if kind == "popup" {
+            let target_id = required_resource_target(target_id.as_deref(), kind)?;
+            self.browser.get_tab(client_id, target_id).await?;
+            let lifecycle = self.browser.subscribe_session_lifecycle();
+            if !self.client_is_active(client_id).await {
+                return Err(client_closed(client_id));
+            }
+            let descriptor =
+                open_descriptor(&resource_id, kind, client_id, Some(target_id), &state);
+            let task = tokio::spawn(forward_popup_events(
+                resource_id.clone(),
+                target_id.to_owned(),
+                lifecycle,
+                cancelled,
+                outbound.clone(),
+                Arc::clone(&state),
+            ));
+            entries.insert(
+                resource_id.clone(),
+                ResourceEntry {
+                    client_id: client_id.to_owned(),
+                    target_id: Some(target_id.to_owned()),
+                    kind: kind.to_owned(),
+                    cancel,
+                    task,
+                    outbound,
+                    state: Arc::clone(&state),
+                    backend: ResourceBackend::Popup,
+                    network_bodies: None,
+                    downloads: None,
+                    cdp_session_id: None,
+                    cdp_domains: None,
+                },
+            );
+            drop(entries);
+            return Ok(descriptor);
+        }
+
         let domains = domains_for(kind)?;
         let mut domain_params = HashMap::new();
         let network_bodies = if kind == "network" {
@@ -382,6 +422,13 @@ impl ResourceRegistry {
         let cdp_session_id = entry.cdp_session_id.clone();
         let cdp_domains = entry.cdp_domains.clone();
         drop(entries);
+
+        if matches!(kind.as_str(), "cdp" | "initScript")
+            || (kind == "dialog" && matches!(command, "accept" | "dismiss"))
+        {
+            let target_id = required_resource_target(target_id.as_deref(), &kind)?;
+            self.browser.require_target(client_id, target_id).await?;
+        }
 
         match (kind.as_str(), command) {
             ("cdp", "send") => {

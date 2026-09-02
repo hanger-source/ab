@@ -58,20 +58,22 @@ await tab.playwright.waitForLoadState("domcontentloaded", { timeoutMs: 15_000 })
 await tab.ax.write("state");
 ```
 
-If the click can open a dialog, download, file chooser, or new tab, open the matching watcher or capture the tab baseline before clicking. Waiting after the action can miss an event or deadlock on a modal dialog.
+If the click can open a dialog, download, file chooser, or new tab, open the matching watcher before clicking. Waiting after the action can miss an event or deadlock on a modal dialog.
 
 ## New tabs and popups
 
-AB exposes target discovery through `browser.tabs.list()` rather than an implicit popup object:
+Agent code uses the opener-scoped `expectPopup()` composition:
 
 ```js
-const before = new Set((await browser.tabs.list()).map(t => t.id));
-await trigger.click();
-const after = await browser.tabs.list();
-const opened = after.filter(t => !before.has(t.id));
+const child = await tab.expectPopup(
+  () => trigger.click(),
+  { timeoutMs: 10_000 },
+);
 ```
 
-Do not assume the new tab is last, active, or already loaded. Select it by target id, URL, title, opener context, and a fresh AX observation. A tab opened by an authorized task action belongs to that task's working set and may be the correct place to continue even when only the starting tab was named initially. Track that inherited ownership before later closing it; never operate unrelated pre-existing tabs.
+The watcher is established before the action and only accepts a ready page target whose exact opener is `tab`. The child inherits the opener's mutation lease. `expectPopup()` does not prove application readiness; verify its URL/title and take a fresh AX observation before the next decision.
+
+Core orchestration can use `watchPopups()`/`waitForPopup()` directly. Do not assume the new tab is last or active, and do not reconstruct this expectation with a fixed sleep or immediate `tabs.list()` diff.
 
 ## Timeouts and cancellation
 

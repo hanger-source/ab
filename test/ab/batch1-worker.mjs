@@ -35,7 +35,7 @@ try {
     }));
   } else if (mode === "verify") {
     assert(process.env.AB_TEST_TAB_ID, "AB_TEST_TAB_ID is required");
-    const tab = await browser.tabs.get(process.env.AB_TEST_TAB_ID);
+    const tab = await browser.tabs.acquire(process.env.AB_TEST_TAB_ID);
     const cdp = await tab.cdp();
     const evaluated = await cdp.send("Runtime.evaluate", {
       expression: `({ title: document.title, value: localStorage.getItem("ab-batch-1") })`,

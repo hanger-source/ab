@@ -4,6 +4,7 @@ export {
   Tabs,
   Tab,
   type ConnectOptions,
+  type PopupExpectationOptions,
 } from "./browser.js";
 
 export {

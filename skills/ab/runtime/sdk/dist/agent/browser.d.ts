@@ -15,6 +15,7 @@ export type ConnectOptions = {
     signal?: AbortSignal;
     presenter?: Presenter;
 };
+export type PopupExpectationOptions = OperationOptions;
 /** Explicit Agent-facing tab with capability namespaces instead of Core forwarding. */
 export declare class Tab {
     #private;
@@ -29,6 +30,8 @@ export declare class Tab {
     get openerId(): string | null;
     get url(): string;
     get active(): boolean;
+    get ownership(): "available" | "owned" | "other";
+    acquire(options?: OperationOptions): Promise<Tab>;
     refresh(options?: OperationOptions): Promise<Tab>;
     goto(url: string, options?: NavigateOptions): Promise<void>;
     reload(options?: OperationOptions): Promise<void>;
@@ -36,6 +39,11 @@ export declare class Tab {
     goForward(options?: OperationOptions): Promise<void>;
     activate(options?: OperationOptions): Promise<void>;
     close(options?: OperationOptions): Promise<void>;
+    /**
+     * Arms a popup watcher before running the action and returns the exact ready
+     * child target created by this tab.
+     */
+    expectPopup(action: () => unknown | Promise<unknown>, options?: PopupExpectationOptions): Promise<Tab>;
     screenshot(options?: ScreenshotOptions): Promise<Screenshot>;
     [inspect.custom](): string;
 }
@@ -45,6 +53,7 @@ export declare class Tabs {
     private constructor();
     list(options?: OperationOptions): Promise<Tab[]>;
     get(targetId: string, options?: OperationOptions): Promise<Tab>;
+    acquire(targetId: string, options?: OperationOptions): Promise<Tab>;
     open(url?: string, options?: NavigateOptions): Promise<Tab>;
 }
 export declare class Browser {

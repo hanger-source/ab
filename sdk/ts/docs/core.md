@@ -57,7 +57,10 @@ Core remains available from `@hanger-source/ab` for programmatic callers that ow
 import { connect } from "@hanger-source/ab";
 
 const core = await connect();
-const tab = (await core.tabs.list())[0];
+const [candidate] = await core.tabs.list();
+const tab = candidate
+  ? await core.tabs.acquire(candidate.id)
+  : await core.tabs.open("https://example.com/");
 const state = await tab.ax.snapshot({ mode: "full", surface: "document" });
 await state.ref("e12").click({ observe: "diff" });
 ```

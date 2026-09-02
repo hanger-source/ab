@@ -2,6 +2,7 @@ use super::init_scripts::{InitScriptDefinition, InitScriptInstance, InitScriptSu
 use super::owner::BrowserOwner;
 use super::session_manager::{DialogLifecycle, FrameState, RealmState};
 use super::target_lane::TargetState;
+use super::target_leases::TargetOwnership;
 use crate::actions::{
     dispatch_mechanism, ActionCoordinateIdentity, ActionDispatchMarker, ActionObservationOutcome,
     ActionResult, ActionRunner, ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange,
@@ -39,6 +40,7 @@ pub struct TabInfo {
     pub url: String,
     pub kind: String,
     pub active: bool,
+    pub ownership: TargetOwnership,
     pub engine_id: String,
     pub label: Option<String>,
 }
@@ -220,46 +222,60 @@ impl BrowserCore {
         self.owner.subscribe_disconnected()
     }
 
-    pub async fn list_tabs(&self) -> AbResult<Vec<TabInfo>> {
+    pub async fn list_tabs(&self, client_id: &str) -> AbResult<Vec<TabInfo>> {
         let sessions = self.owner.sessions();
         let tabs = sessions.tabs().await;
         let active_target_ids = sessions.active_target_ids(&tabs).await;
-        Ok(tabs
-            .into_iter()
-            .map(|target| {
-                let active = active_target_ids.contains(&target.target_id);
-                tab_info(target, active)
-            })
-            .collect())
+        let mut infos = Vec::with_capacity(tabs.len());
+        for target in tabs {
+            let active = active_target_ids.contains(&target.target_id);
+            let ownership = self
+                .owner
+                .target_ownership(client_id, &target.target_id)
+                .await;
+            infos.push(tab_info(target, active, ownership));
+        }
+        Ok(infos)
     }
 
     pub async fn open_tab(
         &self,
+        client_id: &str,
         url: &str,
         wait_until: &str,
         timeout_ms: u64,
     ) -> AbResult<TabInfo> {
-        let session = self.owner.sessions().open_tab("about:blank").await?;
+        let session = self.owner.open_target(client_id).await?;
         let target_id = session.target_id.clone();
         if url != "about:blank" {
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             if let Err(error) = self.navigate(&target_id, url, wait_until, deadline).await {
-                let _ = self.owner.close_target(&target_id).await;
+                let _ = self.owner.close_target(client_id, &target_id).await;
                 return Err(error);
             }
         }
-        self.get_tab(&target_id).await
+        self.get_tab(client_id, &target_id).await
     }
 
-    pub async fn get_tab(&self, target_id: &str) -> AbResult<TabInfo> {
+    pub async fn get_tab(&self, client_id: &str, target_id: &str) -> AbResult<TabInfo> {
         let sessions = self.owner.sessions();
         let target = sessions.target(target_id).await?;
         let active = sessions.target_is_active(&target).await;
-        Ok(tab_info(target, active))
+        let ownership = self.owner.target_ownership(client_id, target_id).await;
+        Ok(tab_info(target, active, ownership))
     }
 
-    pub async fn close_tab(&self, target_id: &str) -> AbResult<()> {
-        self.owner.close_target(target_id).await
+    pub async fn acquire_tab(&self, client_id: &str, target_id: &str) -> AbResult<TabInfo> {
+        self.owner.acquire_target(client_id, target_id).await?;
+        self.get_tab(client_id, target_id).await
+    }
+
+    pub async fn require_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
+        self.owner.require_target(client_id, target_id).await
+    }
+
+    pub async fn close_tab(&self, client_id: &str, target_id: &str) -> AbResult<()> {
+        self.owner.close_target(client_id, target_id).await
     }
 
     pub async fn frames(&self, target_id: &str) -> AbResult<Vec<FrameRecord>> {
@@ -706,6 +722,7 @@ impl BrowserCore {
         self.observations.cleanup_client(client_id).await;
         self.elements.cleanup_client(client_id).await;
         self.artifacts.release_owner(client_id);
+        self.owner.cleanup_client(client_id).await;
     }
 
     async fn begin_action(
@@ -996,6 +1013,11 @@ impl BrowserCore {
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
         let target = self.elements.target(client_id, element_id).await?;
+        if returns_action_result(operation) {
+            self.owner
+                .require_target(client_id, &target.target_id)
+                .await?;
+        }
         let mut lane = self.owner.lock_target(&target.target_id).await?;
         let context = self.context(&target.target_id).await?;
         if operation == "screenshot" {
@@ -2131,7 +2153,11 @@ fn action_diagnostic(action: &str, stage: &str, elapsed_ms: u128) {
     }
 }
 
-fn tab_info(target: super::session_manager::TargetSession, active: bool) -> TabInfo {
+fn tab_info(
+    target: super::session_manager::TargetSession,
+    active: bool,
+    ownership: TargetOwnership,
+) -> TabInfo {
     TabInfo {
         id: target.target_id,
         opener_id: target.opener_id,
@@ -2139,6 +2165,7 @@ fn tab_info(target: super::session_manager::TargetSession, active: bool) -> TabI
         url: target.url,
         kind: target.target_type,
         active,
+        ownership,
         engine_id: "ab".to_owned(),
         label: None,
     }

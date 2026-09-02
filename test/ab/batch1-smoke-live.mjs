@@ -58,7 +58,7 @@ try {
     second.identity.browserGeneration,
     firstIdentity.browserGeneration,
   );
-  const sameTab = await second.tabs.get(tab.id);
+  const sameTab = await second.tabs.acquire(tab.id);
   const secondCdp = await sameTab.cdp();
   const persisted = await secondCdp.send("Runtime.evaluate", {
     expression: `({ title: document.title, value: localStorage.getItem("ab-batch-1") })`,

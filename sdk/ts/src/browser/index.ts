@@ -21,6 +21,7 @@ import {
   type InitScriptDefinition,
   NetworkObserver,
   type NetworkObserverOptions,
+  PopupWatcher,
   type ResourceDescriptor,
   type ResourceKind,
 } from "../resources/index.js";
@@ -43,6 +44,7 @@ export type TabInfo = {
   url: string;
   kind: string;
   active: boolean;
+  ownership: "available" | "owned" | "other";
   engineId: string;
   label: string | null;
 };
@@ -314,6 +316,7 @@ export class Tab {
   #title: string;
   #url: string;
   #active: boolean;
+  #ownership: TabInfo["ownership"];
   readonly #client: ProtocolClient;
 
   constructor(client: ProtocolClient, info: TabInfo) {
@@ -325,6 +328,7 @@ export class Tab {
     this.#title = info.title;
     this.#url = info.url;
     this.#active = info.active;
+    this.#ownership = info.ownership;
   }
 
   get title(): string {
@@ -341,6 +345,11 @@ export class Tab {
 
   get active(): boolean {
     return this.#active;
+  }
+
+  /** Mutable-target ownership relative to this SDK client. */
+  get ownership(): TabInfo["ownership"] {
+    return this.#ownership;
   }
 
   /**
@@ -365,6 +374,21 @@ export class Tab {
     this.#openerId = info.openerId;
     this.#url = info.url;
     this.#active = info.active;
+    this.#ownership = info.ownership;
+    return this;
+  }
+
+  /** Acquires this existing target for mutation by the current SDK client. */
+  async acquire(options: OperationOptions = {}): Promise<Tab> {
+    const info = await this.#client.request<TabInfo>("tabs.acquire", {}, {
+      target: { tabId: this.id },
+      ...options,
+    });
+    this.#title = info.title;
+    this.#openerId = info.openerId;
+    this.#url = info.url;
+    this.#active = info.active;
+    this.#ownership = info.ownership;
     return this;
   }
 
@@ -454,6 +478,10 @@ export class Tab {
 
   watchDialogs(options: OperationOptions = {}): Promise<DialogWatcher> {
     return this.#openResource("dialog", DialogWatcher, {}, options);
+  }
+
+  watchPopups(options: OperationOptions = {}): Promise<PopupWatcher> {
+    return this.#openResource("popup", PopupWatcher, {}, options);
   }
 
   watchDownloads(options: OperationOptions = {}): Promise<DownloadWatcher> {
@@ -670,7 +698,7 @@ export class Tab {
   }
 
   [inspect.custom](): string {
-    return `Tab { id: '${this.id}', title: ${JSON.stringify(this.#title)}, url: ${JSON.stringify(this.#url)} }`;
+    return `Tab { id: '${this.id}', title: ${JSON.stringify(this.#title)}, url: ${JSON.stringify(this.#url)}, ownership: '${this.#ownership}' }`;
   }
 }
 
@@ -689,6 +717,15 @@ export class Tabs {
 
   async get(targetId: string, options: OperationOptions = {}): Promise<Tab> {
     const info = await this.#client.request<TabInfo>("tabs.get", {}, {
+      target: { tabId: targetId },
+      ...options,
+    });
+    return new Tab(this.#client, info);
+  }
+
+  /** Gets and atomically acquires an existing target for this client. */
+  async acquire(targetId: string, options: OperationOptions = {}): Promise<Tab> {
+    const info = await this.#client.request<TabInfo>("tabs.acquire", {}, {
       target: { tabId: targetId },
       ...options,
     });

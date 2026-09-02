@@ -276,6 +276,27 @@ export class DialogWatcher extends Resource {
         return new Dialog(this, parseDialogInfo(event.params));
     }
 }
+export class PopupWatcher extends Resource {
+    #lastCreatedSequence = 0;
+    async waitForPopup(options = {}) {
+        const event = await this.waitFor((candidate) => candidate.method === "Target.targetCreated"
+            && candidate.sequence > this.#lastCreatedSequence, options);
+        this.#lastCreatedSequence = event.sequence;
+        const { targetId, openerId, url, title, type } = event.params;
+        if (typeof targetId !== "string"
+            || typeof openerId !== "string"
+            || typeof url !== "string"
+            || typeof title !== "string"
+            || typeof type !== "string") {
+            throw new ABError({
+                kind: "invalid_resource_event",
+                stage: "sdk.resource.popup",
+                message: `popup resource ${this.id} returned an invalid target identity`,
+            });
+        }
+        return { targetId, openerId, url, title, type };
+    }
+}
 export class Dialog {
     id;
     rootTargetId;

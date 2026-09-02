@@ -104,7 +104,7 @@ Call the persistent JavaScript Tool repeatedly. The first cell imports the versi
 ```js
 const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
 const agent = await connect();
-let tabs = await browser.tabs.list();
+let tabs = await agent.tabs.list();
 nodeRepl.write(tabs);
 ```
 

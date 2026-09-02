@@ -6,7 +6,7 @@ import { Diagnostics } from "../diagnostics/index.js";
 import { buildEvaluateScript, deserializeEvaluateResult } from "./evaluate-values.js";
 import { Locator } from "../locators/index.js";
 import { AX, AXState } from "../ax/index.js";
-import { ConsoleObserver, DialogWatcher, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, NetworkObserver, } from "../resources/index.js";
+import { ConsoleObserver, DialogWatcher, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, NetworkObserver, PopupWatcher, } from "../resources/index.js";
 import { ProtocolClient } from "../transport/index.js";
 /** Explicit low-level CDP access for diagnostics and unsupported primitives. */
 export class CDPSession {
@@ -175,6 +175,7 @@ export class Tab {
     #title;
     #url;
     #active;
+    #ownership;
     #client;
     constructor(client, info) {
         this.#client = client;
@@ -185,6 +186,7 @@ export class Tab {
         this.#title = info.title;
         this.#url = info.url;
         this.#active = info.active;
+        this.#ownership = info.ownership;
     }
     get title() {
         return this.#title;
@@ -197,6 +199,10 @@ export class Tab {
     }
     get active() {
         return this.#active;
+    }
+    /** Mutable-target ownership relative to this SDK client. */
+    get ownership() {
+        return this.#ownership;
     }
     /**
      * Applies the final browser-owned URL carried by an Agent action without a
@@ -219,6 +225,20 @@ export class Tab {
         this.#openerId = info.openerId;
         this.#url = info.url;
         this.#active = info.active;
+        this.#ownership = info.ownership;
+        return this;
+    }
+    /** Acquires this existing target for mutation by the current SDK client. */
+    async acquire(options = {}) {
+        const info = await this.#client.request("tabs.acquire", {}, {
+            target: { tabId: this.id },
+            ...options,
+        });
+        this.#title = info.title;
+        this.#openerId = info.openerId;
+        this.#url = info.url;
+        this.#active = info.active;
+        this.#ownership = info.ownership;
         return this;
     }
     /** Navigates this tab and waits for the requested mechanical lifecycle state. */
@@ -295,6 +315,9 @@ export class Tab {
     }
     watchDialogs(options = {}) {
         return this.#openResource("dialog", DialogWatcher, {}, options);
+    }
+    watchPopups(options = {}) {
+        return this.#openResource("popup", PopupWatcher, {}, options);
     }
     watchDownloads(options = {}) {
         return this.#openResource("download", DownloadWatcher, {}, options);
@@ -446,7 +469,7 @@ export class Tab {
         return new ResourceType(this.#client, descriptor);
     }
     [inspect.custom]() {
-        return `Tab { id: '${this.id}', title: ${JSON.stringify(this.#title)}, url: ${JSON.stringify(this.#url)} }`;
+        return `Tab { id: '${this.id}', title: ${JSON.stringify(this.#title)}, url: ${JSON.stringify(this.#url)}, ownership: '${this.#ownership}' }`;
     }
 }
 /** Browser target discovery and creation. */
@@ -461,6 +484,14 @@ export class Tabs {
     }
     async get(targetId, options = {}) {
         const info = await this.#client.request("tabs.get", {}, {
+            target: { tabId: targetId },
+            ...options,
+        });
+        return new Tab(this.#client, info);
+    }
+    /** Gets and atomically acquires an existing target for this client. */
+    async acquire(targetId, options = {}) {
+        const info = await this.#client.request("tabs.acquire", {}, {
             target: { tabId: targetId },
             ...options,
         });

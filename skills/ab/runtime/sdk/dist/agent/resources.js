@@ -22,6 +22,10 @@ export class Resources {
         this.#documentation.require("console-dialogs", "tab.resources.dialogs()");
         return this.#core.watchDialogs(options);
     }
+    popups(options = {}) {
+        this.#documentation.require("tabs", "tab.resources.popups()");
+        return this.#core.watchPopups(options);
+    }
     downloads(options = {}) {
         this.#documentation.require("downloads", "tab.resources.downloads()");
         return this.#core.watchDownloads(options);

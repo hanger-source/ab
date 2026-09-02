@@ -3,6 +3,7 @@ mod download;
 mod events;
 mod init_scripts;
 mod network;
+mod popup;
 mod registry;
 mod state;
 

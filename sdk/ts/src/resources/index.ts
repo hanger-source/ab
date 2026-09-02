@@ -29,6 +29,7 @@ export type ResourceKind =
   | "network"
   | "console"
   | "dialog"
+  | "popup"
   | "download"
   | "fileChooser"
   | "initScript";
@@ -101,6 +102,14 @@ export type DialogInfo = {
   url: string;
   defaultPrompt: string;
   hasBrowserHandler: boolean;
+};
+
+export type PopupInfo = {
+  targetId: string;
+  openerId: string;
+  url: string;
+  title: string;
+  type: string;
 };
 
 export type ResourceState = {
@@ -493,6 +502,34 @@ export class DialogWatcher extends Resource {
     );
     this.#lastOpenedSequence = event.sequence;
     return new Dialog(this, parseDialogInfo(event.params));
+  }
+}
+
+export class PopupWatcher extends Resource {
+  #lastCreatedSequence = 0;
+
+  async waitForPopup(options: OperationOptions = {}): Promise<PopupInfo> {
+    const event = await this.waitFor(
+      (candidate) => candidate.method === "Target.targetCreated"
+        && candidate.sequence > this.#lastCreatedSequence,
+      options,
+    );
+    this.#lastCreatedSequence = event.sequence;
+    const { targetId, openerId, url, title, type } = event.params;
+    if (
+      typeof targetId !== "string"
+      || typeof openerId !== "string"
+      || typeof url !== "string"
+      || typeof title !== "string"
+      || typeof type !== "string"
+    ) {
+      throw new ABError({
+        kind: "invalid_resource_event",
+        stage: "sdk.resource.popup",
+        message: `popup resource ${this.id} returned an invalid target identity`,
+      });
+    }
+    return { targetId, openerId, url, title, type };
   }
 }
 

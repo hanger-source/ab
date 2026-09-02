@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ab-protocol"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 dependencies = [
  "schemars",
  "serde",
@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "ab-runtime"
-version = "0.3.0-alpha.3"
+version = "0.3.0-alpha.4"
 dependencies = [
  "ab-protocol",
  "agent-browser",

@@ -31,6 +31,10 @@ export type ConnectOptions = {
   presenter?: Presenter;
 };
 
+export type PopupExpectationOptions = OperationOptions;
+
+type TabResolver = (targetId: string, options?: OperationOptions) => Promise<Tab>;
+
 /** Explicit Agent-facing tab with capability namespaces instead of Core forwarding. */
 export class Tab {
   readonly ax: AX;
@@ -40,14 +44,17 @@ export class Tab {
   readonly dev: Dev;
   readonly #core: CoreTab;
   readonly #documentation: DocumentationRegistry;
+  readonly #resolveTab: TabResolver;
 
   private constructor(
     core: CoreTab,
     presenter: Presenter,
     documentation: DocumentationRegistry,
+    resolveTab: TabResolver,
   ) {
     this.#core = core;
     this.#documentation = documentation;
+    this.#resolveTab = resolveTab;
     this.ax = AX.create(core, presenter, documentation);
     this.playwright = Playwright.create(core, this.ax);
     this.cua = CUA.create(core.cua, this.ax);
@@ -56,8 +63,13 @@ export class Tab {
   }
 
   /** @internal */
-  static create(core: CoreTab, presenter: Presenter, documentation: DocumentationRegistry): Tab {
-    return new Tab(core, presenter, documentation);
+  static create(
+    core: CoreTab,
+    presenter: Presenter,
+    documentation: DocumentationRegistry,
+    resolveTab: TabResolver,
+  ): Tab {
+    return new Tab(core, presenter, documentation, resolveTab);
   }
 
   get id(): string {
@@ -78,6 +90,15 @@ export class Tab {
 
   get active(): boolean {
     return this.#core.active;
+  }
+
+  get ownership(): "available" | "owned" | "other" {
+    return this.#core.ownership;
+  }
+
+  async acquire(options: OperationOptions = {}): Promise<Tab> {
+    await this.#core.acquire(options);
+    return this;
   }
 
   async refresh(options: OperationOptions = {}): Promise<Tab> {
@@ -107,6 +128,25 @@ export class Tab {
 
   close(options: OperationOptions = {}): Promise<void> {
     return this.#core.close(options);
+  }
+
+  /**
+   * Arms a popup watcher before running the action and returns the exact ready
+   * child target created by this tab.
+   */
+  async expectPopup(
+    action: () => unknown | Promise<unknown>,
+    options: PopupExpectationOptions = {},
+  ): Promise<Tab> {
+    this.#documentation.require("tabs", "tab.expectPopup()");
+    const watcher = await this.#core.watchPopups(options);
+    try {
+      await action();
+      const popup = await watcher.waitForPopup(options);
+      return await this.#resolveTab(popup.targetId, options);
+    } finally {
+      await watcher.dispose(options);
+    }
   }
 
   screenshot(options: ScreenshotOptions = {}): Promise<Screenshot> {
@@ -154,6 +194,10 @@ export class Tabs {
     return this.#wrap(await this.#core.tabs.get(targetId, options), options);
   }
 
+  async acquire(targetId: string, options: OperationOptions = {}): Promise<Tab> {
+    return this.#wrap(await this.#core.tabs.acquire(targetId, options), options);
+  }
+
   async open(url = "about:blank", options: NavigateOptions = {}): Promise<Tab> {
     return this.#wrap(await this.#core.tabs.open(url, options), options);
   }
@@ -170,7 +214,12 @@ export class Tabs {
       await existing.core.refresh(options);
       return existing.tab;
     }
-    const tab = Tab.create(core, this.#presenter, this.#documentation);
+    const tab = Tab.create(
+      core,
+      this.#presenter,
+      this.#documentation,
+      (targetId, resolveOptions = {}) => this.get(targetId, resolveOptions),
+    );
     this.#cache.set(core.id, { core, tab });
     return tab;
   }
@@ -221,8 +270,9 @@ export class Browser {
       await this.#core.disconnect();
     } finally {
       try {
-        // Socket EOF is the server-side cleanup boundary. Local observation
-        // disposal must not turn a successful disconnect into a failure.
+        // Core establishes the server-side cleanup boundary before local
+        // presentation objects are discarded. Their disposal must not turn a
+        // completed disconnect into a failure.
         await this.tabs.dispose().catch(() => undefined);
       } finally {
         this.#onDisconnect();

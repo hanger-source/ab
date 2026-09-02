@@ -4,8 +4,10 @@ List before opening when an existing signed-in tab may be useful. Track tabs cre
 
 ```js
 let tabs = await browser.tabs.list();
-let tab = tabs.find(value => value.url.startsWith("https://example.com/"));
-if (!tab) tab = await browser.tabs.open("https://example.com/", { waitUntil: "domcontentloaded" });
+const candidate = tabs.find(value => value.url.startsWith("https://example.com/"));
+let tab = candidate
+  ? await browser.tabs.acquire(candidate.id)
+  : await browser.tabs.open("https://example.com/", { waitUntil: "domcontentloaded" });
 ```
 
 `tabs.open(url)` creates a tab and, by default, waits for that navigation's `domcontentloaded`. `waitUntil: "load"` waits for the load event; `"none"` deliberately returns after dispatch. `tab.goto()` uses the same options. These waits prove browser lifecycle events, not application success.
@@ -33,29 +35,41 @@ Do not mutate every matching tab to discover which one is relevant. When metadat
 
 `Tab.title` is Chrome Target discovery metadata. It can lag document state or use a URL-like value for special schemes such as `data:`. Treat it as a selection hint, not proof of `document.title`; when the exact page title is a task fact, load the evaluate topic and read `document.title` from the intended tab.
 
-## Existing versus task-created tabs
+## Discovery, mutation ownership, and task scope
 
-Maintain explicit ownership in the Node session. Reusing an existing tab does not make it task-owned. Closing it can destroy user or previous-task state.
+The persistent Chrome is shared, but mutation authority is not. `tabs.list()` and `tabs.get()` return discovery handles whose `ownership` is relative to this client:
+
+- `available`: no active client holds the target lease;
+- `owned`: this client may mutate the target;
+- `other`: another active client holds the target lease.
+
+`tabs.open()` atomically owns its new target. To reuse an existing available target, call `tabs.acquire(targetId)` before navigation, activation, evaluate, input, CDP mutation, or close. The same client may acquire it again. An acquire against `other` fails with `target_in_use`; do not wait, retry, steal, or silently switch to another target.
+
+Reads and bounded observations remain possible without a lease so an Agent can identify the right candidate. The Runtime checks every mutation again; a stale local `ownership` field never grants authority.
+
+Target mutation ownership is not user-content ownership. Acquiring an existing tab does not authorize closing it. Maintain a local set only for tabs created by this task:
 
 ```js
-const taskTabs = new Set();
+const createdByTask = new Set();
 const created = await browser.tabs.open("about:blank");
-taskTabs.add(created.id);
+createdByTask.add(created.id);
 ```
 
 The tab initially selected by a user, coordinator, or benchmark is the task entry point, not necessarily the only task tab. If an authorized click opens a product editor, authentication flow, detail view, or other child tab needed by that task, the new target inherits task ownership. Continue the workflow there after verifying its id and rendered identity. A generic instruction to operate the named starting tab does not forbid these task-created descendants unless the caller explicitly says the workflow must remain in one target.
 
-If an operation can open a popup, capture the baseline before the trigger and compare ids afterwards. Do not assume the popup is last or active:
+If an operation is expected to open a popup, arm the opener-scoped watcher before the trigger:
 
 ```js
-const before = new Set((await browser.tabs.list()).map(value => value.id));
-await opener.click();
-const after = await browser.tabs.list();
-const opened = after.filter(value => !before.has(value.id));
-for (const child of opened) taskTabs.add(child.id);
+const child = await tab.expectPopup(
+  () => tab.playwright.getByRole("link", { name: "Open", exact: true }).click(),
+  { timeoutMs: 10_000 },
+);
+createdByTask.add(child.id);
 ```
 
-Inspect each new candidate by id, URL/title, opener context, and fresh AX state before mutating it. Never convert unrelated pre-existing tabs into task-owned tabs merely because they share an origin.
+`expectPopup()` subscribes before the action, waits for a ready root page whose exact `openerId` is this tab, and returns that child with the opener's lease already inherited. It does not pick the last, active, or same-origin tab. Inspect its URL/title and fresh AX state before continuing.
+
+For lower-level orchestration, use `const watcher = await tab.resources.popups()` before the action, then `await watcher.waitForPopup()` and dispose it. Do not replace either form with a fixed sleep and before/after tab-list diff; a fast or not-yet-ready target can be missed.
 
 ## Navigation operations
 
@@ -67,7 +81,8 @@ Inspect each new candidate by id, URL/title, opener context, and fresh AX state 
 - `waitFor({ selector, text, state, timeoutMs, signal })`: wait for an explicit page condition.
 - `playwright.waitForURL(pattern, options)`: wait for current target URL to match a substring or `*` wildcard pattern.
 - `playwright.waitForLoadState(state, options)`: wait for `domcontentloaded` or `load`; it does not imply application readiness.
-- `close(options)`: close that target; use only for task-owned tabs or an explicitly requested close.
+- `acquire(options)`: atomically acquire an existing available target for this client.
+- `close(options)`: close that target; requires the client lease and separate task/user authorization.
 
 Navigation methods update `tab.url`, `tab.title`, and `tab.active` through `refresh()`. They do not update local frame, realm, AX, element, screenshot, or resource objects held elsewhere.
 
@@ -80,10 +95,10 @@ A client-side route change can keep the same top-level document while replacing 
 Close only ids in the task-owned set:
 
 ```js
-for (const id of taskTabs) {
+for (const id of createdByTask) {
   const owned = await browser.tabs.get(id).catch(() => null);
   if (owned) await owned.close();
 }
 ```
 
-Then disconnect the Agent client. Leaving the fixed-profile Chrome running is expected.
+Then disconnect the Agent client. Disconnect releases this client's target leases and server-owned resources while leaving ordinary tabs and the fixed-profile Chrome running.

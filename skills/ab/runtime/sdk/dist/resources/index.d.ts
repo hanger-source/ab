@@ -19,7 +19,7 @@ export type ResourceScope = {
     targetId: string;
 };
 export type ResourceLifecycleState = "open" | "closed";
-export type ResourceKind = "cdp" | "network" | "console" | "dialog" | "download" | "fileChooser" | "initScript";
+export type ResourceKind = "cdp" | "network" | "console" | "dialog" | "popup" | "download" | "fileChooser" | "initScript";
 export type InitScriptWorld = "main" | "isolated";
 export type InitScriptFrames = "all" | "top";
 export type InitScriptDefinition = {
@@ -77,6 +77,13 @@ export type DialogInfo = {
     url: string;
     defaultPrompt: string;
     hasBrowserHandler: boolean;
+};
+export type PopupInfo = {
+    targetId: string;
+    openerId: string;
+    url: string;
+    title: string;
+    type: string;
 };
 export type ResourceState = {
     state: ResourceLifecycleState;
@@ -147,6 +154,10 @@ export declare class ConsoleObserver extends Resource {
 export declare class DialogWatcher extends Resource {
     #private;
     waitForDialog(options?: OperationOptions): Promise<Dialog>;
+}
+export declare class PopupWatcher extends Resource {
+    #private;
+    waitForPopup(options?: OperationOptions): Promise<PopupInfo>;
 }
 export declare class Dialog {
     #private;

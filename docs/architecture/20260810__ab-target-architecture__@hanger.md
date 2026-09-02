@@ -91,7 +91,7 @@ Node.js ESM 是正式用户运行时。交互模式是宿主管理的持久 Java
 7. SDK 与 daemon handshake 验证 exact server build、protocol version、当前 browser generation 和 client id；
 8. Chrome、CDP 与 target registry ready 后，`connect()` 返回绑定该 client session 的 Browser。
 
-`browser.disconnect()` 只结束当前 SDK client：拒绝该 client 的新请求，释放它拥有的 observer、CDP session、ElementHandle、observation 和 init-script resource，然后关闭 socket。Node 进程退出或 socket EOF 触发同一 client cleanup。它不关闭 daemon、Chrome 或其他 client 的资源。
+`browser.disconnect()` 只结束当前 SDK client：没有 operation in flight 时，它先拒绝新请求，以内部 `client.release` 等待 Rust 释放该 client 的 observer、CDP session、ElementHandle、observation、init-script resource 和 target lease，再关闭 socket；已有 operation 尚未结束时，disconnect 直接进入 transport interruption，让 Rust 先取消或结算这些 operation，再从 EOF 执行同一幂等 cleanup，避免 release 与在途 resource command 争用内部 owner lock。Node 进程退出或异常 socket EOF 也走 interruption cleanup。它不关闭 daemon、Chrome 或其他 client 的资源。
 
 daemon 没有 idle 自动退出；它在当前 OS 用户会话中持续运行，Chrome 与 tab 因此跨 Agent/Node 任务保留。用户主动关闭 Chrome或 Chrome crash 时，daemon 使当前 browser generation 的全部 handle 失效并拒绝 pending，不自动重放操作；下一次显式 `connect()` 才重新启动 Chrome。daemon crash 后 Chrome 可以继续存在，后续 SDK 自动拉起的新 daemon 通过固定 profile 的 `DevToolsActivePort` 重新接管，不重开第二个 Chrome。
 
@@ -138,11 +138,12 @@ SDK 与 Rust 使用 versioned、length-prefixed JSON RPC over Unix domain socket
 - 每个 request 有 id、method、target、params、deadline 与 trace context；
 - terminal response 只能出现一次；
 - SDK 超时会发送 cancel，但 cancel 不把已经产生的副作用说成“没有执行”；
+- 无 operation in flight 时，`client.release` 先完成当前 client 的 Resource 与 target lease 清理并确认，再由 SDK 关闭 transport；有在途 operation 或异常断开时，以 transport interruption / EOF 先结算请求再触发同一幂等清理；
 - transport 断开不自动重放 navigate、click、fill、press 等操作；
 - Rust 可以发送 stage、resource event、resource closed 与 browser-generation event；
 - 大结果通过本地 artifact descriptor 交付，SDK 校验 sha256/bytes/mediaType 后读取，不在 JSON 中截断。
 
-RPC 不引入 provider、workspace、extension origin、Node relay、TCP admission 或 token 服务。runtime 目录为 `0700`、socket 为 `0600`，daemon 在平台允许时校验 peer uid。多个 SDK 进程可以连接同一 daemon；每个 connection 的 pending、resource 与 cleanup 独立，浏览器事实 registry 仍只有 Rust 一份。
+RPC 不引入 provider、workspace、extension origin、Node relay、TCP admission 或 token 服务。runtime 目录为 `0700`、socket 为 `0600`，daemon 在平台允许时校验 peer uid。多个 SDK 进程可以连接同一 daemon；每个 connection 的 pending、resource、target mutation lease 与 cleanup 独立，浏览器事实 registry 仍只有 Rust 一份。
 
 ### 4.4 CDP 运行时
 
@@ -162,7 +163,7 @@ RPC 不引入 provider、workspace、extension origin、Node relay、TCP admissi
 `Browser` 绑定当前 SDK client id、daemon runtime id 和 browser generation，暴露：
 
 - `capabilities()`；
-- `tabs.list/get/open()`；
+- `tabs.list/get/acquire/open()`；
 - `resources.list/get/close()`；
 - browser-wide download observer；
 - `disconnect()`。
@@ -179,6 +180,8 @@ RPC 不引入 provider、workspace、extension origin、Node relay、TCP admissi
 - CDP、network、console、dialog、download、file chooser 与 init script。
 
 public id 使用 CDP target id 字符串，不伪造 extension 的数值 `tabId`。runtime 活着时不会因某个临时 handle 释放而隐式关闭 tab；关闭页面必须显式调用 `tab.close()`。
+
+所有 client 可以发现和只读观察 target，但同一时刻只有一个活跃 client 持有它的 mutation lease。`tabs.open()` 在 target 对其他 acquisition 可见前取得创建者 lease；复用已有 target 必须显式 `tabs.acquire(targetId)`。导航、activation/history、evaluate、输入、可变 Resource command 与 close 在 Rust dispatch 前复核 lease，冲突硬失败，不排队、不抢占、不按 active/URL/opener 选择替代 target。client transport 断开后释放 lease而不关闭普通 tab。popup child 按准确 opener 继承 lease。
 
 ### BrowserContext
 
@@ -209,7 +212,10 @@ Document generation 由 server 在 loader/document/execution-context 变化时�
 import { connect } from "@hanger-source/ab";
 
 const browser = await connect();
-const tab = (await browser.tabs.list())[0];
+const [candidate] = await browser.tabs.list();
+const tab = candidate
+  ? await browser.tabs.acquire(candidate.id)
+  : await browser.tabs.open("https://example.com/");
 const state = await tab.ax.snapshot({ mode: "interactive" });
 await state.ref("e12").click({ observe: "diff" });
 ```
@@ -220,7 +226,10 @@ await state.ref("e12").click({ observe: "diff" });
 import { connect } from "@hanger-source/ab/agent";
 
 const browser = await connect();
-const tab = (await browser.tabs.list())[0];
+const [candidate] = await browser.tabs.list();
+const tab = candidate
+  ? await browser.tabs.acquire(candidate.id)
+  : await browser.tabs.open("https://example.com/");
 await tab.ax.write("state");
 await tab.ax.click("e12");
 ```
@@ -361,6 +370,12 @@ type PageObservation = {
 `PageObservation` 只是一次原子操作的组合结果：`state` 仍是正常的 `AXState`，拥有 observation id、ref 与 dispose 生命周期；`screenshot` 仍是带 artifact、viewport identity 和像素信息的 `Screenshot`。组合对象不保存第三份页面真相。只有 Agent facade 在成功呈现 state 后更新自己的展示基线。
 
 Rust 在同一 tab operation 内固定 target、frame topology、document generation、viewport、scroll 与 DPR，完成请求的 AX/DOM/layout 和 screenshot 采集后重新确认这些 identity。采集期间发生 document、viewport、scroll 或 DPR 变化时不交付互相错位的结果，而是返回明确的 observation consistency 错误。screenshot 在 Core 中仍是独立页面能力；`@hanger-source/ab/agent` 把 `state/screenshot/both` 放进同一个 `ax.get/write` 只是 Agent observation 的消费语义，不改变 Rust/Core 的事实分类。
+
+### 6.9 Popup expectation
+
+popup 是 target lifecycle 事实，不由 click 或下一份 AX observation 猜测。Core `tab.watchPopups()` 在 SessionManager 的 ready-root lifecycle 上创建 opener-scoped Resource；Agent facade 用 `tab.expectPopup(action)` 固定“先订阅、再动作、再等待准确 child”的顺序。返回的 child 保持真实 target id、opener id 和继承的 client mutation lease。超时不选择 last/active/same-origin tab。
+
+这项设计综合 Codex Browser 的显式 Tab/Locator 操作面、Playwright/Puppeteer 的 pre-armed event expectation、agent-browser 的严格 tab binding 与 browser-harness/OpenChrome 的共享浏览器 target 隔离。具体采纳、拒绝和真实对照见 `docs/evidence/20260902__client-target-ownership-and-popup-expectation__@codex.md`。
 
 ## 七、观察引擎
 

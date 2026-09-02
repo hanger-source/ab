@@ -4,7 +4,7 @@ description: "Control AB's persistent headed Chrome through the version-matched 
 license: Apache-2.0
 metadata:
   author: hanger
-  version: "0.3.0-alpha.3"
+  version: "0.3.0-alpha.4"
   repository: https://github.com/hanger-source/ab
   compatibility: macOS arm64, Node.js 20 or later, and Google Chrome
 ---
@@ -56,13 +56,17 @@ Inspect existing tabs before opening another:
 ```ts
 tabs = await browser.tabs.list();
 tabs
-let tab = tabs.find((candidate) => candidate.url.startsWith("https://example.com/"));
-if (!tab) tab = await browser.tabs.open("https://example.com/");
+const candidate = tabs.find((value) => value.url.startsWith("https://example.com/"));
+let tab = candidate
+  ? await browser.tabs.acquire(candidate.id)
+  : await browser.tabs.open("https://example.com/");
 ```
 
-Track tabs created for the task. Close only those tabs when cleanup is appropriate. `browser.disconnect()` releases this SDK client's observations and event resources; it does not close tabs, Chrome, or the daemon.
+`tabs.list/get` are discovery operations. `tabs.open()` atomically owns the new target for this client; an existing available target must be explicitly acquired before navigation, activation, evaluate, input, or close. `ownership: "other"` means another active client owns mutation: do not retry, steal, or switch to a similar tab. Choose another target or report the conflict. Reads and bounded observations remain available for deliberate selection.
 
-A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits that task's scope. Add its id to the task-owned tab set, inspect it by id plus fresh AX state, and continue there when it contains the intended workflow. Do not abandon a valid child tab merely because the coordinator originally named only the starting tab; do not touch unrelated pre-existing tabs.
+Track tabs created for the task. Acquiring an existing tab grants mutation authority while this client is connected; it does not make the tab disposable user content. Close only task-created tabs or tabs the user explicitly asked to close. `browser.disconnect()` releases this client's target leases, observations, and event resources; it does not close tabs, Chrome, or the daemon.
+
+A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits the opener's target lease. When an action is expected to open one, use `tab.expectPopup(() => action())`; it arms target observation before the action and returns the exact ready child. Do not use sleep plus `tabs.list()` diff, assume the child is last/active, or touch unrelated pre-existing tabs.
 
 Read [browser and task lifecycle](references/lifecycle.md) when reusing tabs, recovering from an interrupted JavaScript kernel, or coordinating more than one task. Read [authentication](references/authentication.md) before handling login, SSO, CAPTCHA, or Chrome-owned authentication UI.
 

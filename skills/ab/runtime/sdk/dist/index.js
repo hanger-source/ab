@@ -4,7 +4,7 @@ export { ABError } from "./errors/index.js";
 export { Diagnostics, } from "./diagnostics/index.js";
 export { Artifact, Screenshot, } from "./artifacts/index.js";
 export { ElementHandle, } from "./elements/index.js";
-export { ConsoleObserver, Dialog, DialogWatcher, Download, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, NetworkObserver, Resource, } from "./resources/index.js";
+export { ConsoleObserver, Dialog, DialogWatcher, Download, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, NetworkObserver, PopupWatcher, Resource, } from "./resources/index.js";
 export { CUA, } from "./actions/cua.js";
 export { Locator, } from "./locators/index.js";
 export { AX, AXRef, AXState, } from "./ax/index.js";

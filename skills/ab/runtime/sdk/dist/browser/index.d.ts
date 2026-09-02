@@ -5,7 +5,7 @@ import { Diagnostics } from "../diagnostics/index.js";
 import { Locator } from "../locators/index.js";
 import { AX, AXState, type SnapshotOptions } from "../ax/index.js";
 import type { OperationOptions } from "../options.js";
-import { ConsoleObserver, DialogWatcher, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, type InitScriptDefinition, NetworkObserver, type NetworkObserverOptions } from "../resources/index.js";
+import { ConsoleObserver, DialogWatcher, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, type InitScriptDefinition, NetworkObserver, type NetworkObserverOptions, PopupWatcher } from "../resources/index.js";
 import { ProtocolClient } from "../transport/index.js";
 export type BrowserIdentity = {
     clientId: string;
@@ -23,6 +23,7 @@ export type TabInfo = {
     url: string;
     kind: string;
     active: boolean;
+    ownership: "available" | "owned" | "other";
     engineId: string;
     label: string | null;
 };
@@ -141,7 +142,11 @@ export declare class Tab {
     get openerId(): string | null;
     get url(): string;
     get active(): boolean;
+    /** Mutable-target ownership relative to this SDK client. */
+    get ownership(): TabInfo["ownership"];
     refresh(options?: OperationOptions): Promise<Tab>;
+    /** Acquires this existing target for mutation by the current SDK client. */
+    acquire(options?: OperationOptions): Promise<Tab>;
     /** Navigates this tab and waits for the requested mechanical lifecycle state. */
     navigate(url: string, options?: NavigateOptions): Promise<void>;
     /** Captures pixels and returns a local artifact plus viewport identity. */
@@ -156,6 +161,7 @@ export declare class Tab {
     observeNetwork(options?: NetworkObserverOptions): Promise<NetworkObserver>;
     observeConsole(options?: OperationOptions): Promise<ConsoleObserver>;
     watchDialogs(options?: OperationOptions): Promise<DialogWatcher>;
+    watchPopups(options?: OperationOptions): Promise<PopupWatcher>;
     watchDownloads(options?: OperationOptions): Promise<DownloadWatcher>;
     watchFileChoosers(options?: OperationOptions): Promise<FileChooserWatcher>;
     addInitScript(definition: InitScriptDefinition, options?: OperationOptions): Promise<InitScriptRegistration>;
@@ -214,6 +220,8 @@ export declare class Tabs {
     constructor(client: ProtocolClient);
     list(options?: OperationOptions): Promise<Tab[]>;
     get(targetId: string, options?: OperationOptions): Promise<Tab>;
+    /** Gets and atomically acquires an existing target for this client. */
+    acquire(targetId: string, options?: OperationOptions): Promise<Tab>;
     open(url?: string, options?: NavigateOptions): Promise<Tab>;
 }
 /** One SDK client attached to the persistent AB daemon and Chrome instance. */
