@@ -11,17 +11,21 @@ This local page preserves that large-document interaction shape without dependin
 1. Open a headed Chrome tab containing hundreds of labeled controls and thousands of DOM nodes.
 2. Present the Agent-facing full AX state with the normal 24,000-character budget.
 3. Use a semantic Locator to toggle one small section near the beginning of the document.
-4. Let the normal Agent action path capture and present its post-action diff.
-5. Present the same page in `interactive` mode and repeat the default Agent action, without passing a second capture shape.
+4. Confirm the action returns without capturing or presenting state, then explicitly present the diff at the next decision boundary.
+5. Present the same page in `interactive` mode, repeat the action, and request an explicit diff without passing a second capture shape.
 
 ## Invariants
 
 - The initial state is genuinely truncated at the Agent output budget and still reports at least 400 refs and 6,000 backend nodes.
-- The action uses the explicitly presented same-document observation as its baseline; there is no hidden pre-action full capture.
+- The action performs no hidden pre- or post-action capture and does not advance the presented baseline.
+- Explicit `ax.write("diff")` uses the successfully presented same-document observation as its baseline.
 - Unchanged nodes retain their model-visible ref IDs by frame, document generation, and backend node identity.
 - New nodes receive non-conflicting, usable IDs and appear as added refs.
 - A local mutation produces a bounded local diff, not a page-sized ref-renumbering diff.
-- A default Agent diff inherits the exact mode, surface, frame scope and output bounds of its presented baseline; an `interactive` baseline cannot silently become a `full` post-action capture.
+- An explicit Agent diff inherits the exact mode, surface, frame scope and output bounds of its presented baseline; an `interactive` baseline cannot silently become a `full` capture.
 - The action completes within its public deadline through the ordinary Agent Locator API.
+
+The action/wait/observation owner change that moved capture out of Agent mutations is recorded in
+`docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
 
 The numeric scale is part of the reproduction, not a benchmark score. The assertions do not depend on a private site label, date picker, URL, or task answer.

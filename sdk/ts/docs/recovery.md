@@ -11,7 +11,7 @@ Recover from browser facts, not from repeated guesses. AB errors carry stable `k
 
 Reads can usually be repeated after reconnecting. Mutations require state-based reconciliation.
 
-An `ActionResult` with `observationOutcome.status === "failed"` is different from `outcome_unknown`: browser input dispatch completed, but the requested post-action AX capture did not. Do not repeat the mutation. Read `observationOutcome.error`, then capture a fresh state or use the prepared Resource that represents the intended result. `skippedDialog` likewise means dispatch completed and the dialog in the same result must be handled before AX capture can continue.
+A Core `ActionResult` with `observationOutcome.status === "failed"` is different from `outcome_unknown`: browser input dispatch completed, but the explicitly requested post-action AX capture did not. Do not repeat the mutation. Read `observationOutcome.error`, then capture a fresh state or use the prepared Resource that represents the intended result. `skippedDialog` likewise means dispatch completed and the dialog in the same result must be handled before AX capture can continue. Agent actions normally return `observationOutcome.status === "notRequested"`; their later explicit wait or `ax.write()` has its own failure boundary.
 
 For an interrupted mutation, the request trace first records caller `settled` with `outcome_unknown`, then `operation.settled` when the underlying browser operation reaches its real terminal state. A following action on the same tab waits behind that operation. The terminal trace helps diagnosis; the rendered application state still decides whether the user's business outcome occurred.
 

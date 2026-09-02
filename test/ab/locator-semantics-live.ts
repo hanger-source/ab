@@ -79,6 +79,9 @@ try {
     }
     assert(strictFailure instanceof ABError);
     assert.equal(strictFailure.kind, "strict_violation");
+    assert.match(strictFailure.message, /0\) <button> role="button" name="Save changes"/);
+    assert.match(strictFailure.message, /1\) <button> role="button" name="Save changes"/);
+    assert.match(strictFailure.message, /Refine the locator by scope or semantic identity/);
     const strictDetails = strictFailure.details as {
       count: number;
       candidates: Array<{
@@ -120,6 +123,10 @@ try {
     await locatorBaseline.dispose();
     assert.deepEqual(await tab.evaluate(() => globalThis.clicked), ["1"]);
     assert.equal(await saves.nth(-1).getAttribute("data-index"), "1");
+    assert.equal(
+      await tab.locator("body").getByRole("button", { name: "Save changes", exact: true }).count(),
+      2,
+    );
     assert(await saves.first().boundingBox());
     const saveInspection = await saves.first().inspect({ attributes: ["data-index", "missing"] });
     assert.equal(saveInspection.tagName, "button");

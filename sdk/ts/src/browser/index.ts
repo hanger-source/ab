@@ -52,6 +52,8 @@ export type NavigateOptions = OperationOptions & {
   timeoutMs?: number;
 };
 
+export type LoadState = "domcontentloaded" | "load";
+
 export type ScreenshotOptions = OperationOptions & {
   fullPage?: boolean;
   scale?: ScreenshotScale;
@@ -556,6 +558,28 @@ export class Tab {
       ...(options.state === undefined ? {} : { state: options.state }),
       timeoutMs: options.timeoutMs ?? 30_000,
     }, { target: { tabId: this.id }, ...options });
+  }
+
+  /** Waits until the target URL contains a literal pattern or matches a `*` wildcard pattern. */
+  async waitForURL(url: string, options: OperationOptions = {}): Promise<void> {
+    const result = await this.#client.request<{ url: string }>(
+      "tab.waitForURL",
+      { url },
+      { target: { tabId: this.id }, ...options },
+    );
+    this.#url = result.url;
+  }
+
+  /**
+   * Waits for readiness of the document current when this request reaches the Runtime.
+   * This does not anticipate a future navigation or imply network/application readiness.
+   */
+  async waitForLoadState(state: LoadState = "load", options: OperationOptions = {}): Promise<void> {
+    await this.#client.request(
+      "tab.waitForLoadState",
+      { state },
+      { target: { tabId: this.id }, ...options },
+    );
   }
 
   /**

@@ -48,6 +48,26 @@ export declare class Locator {
     filter(filter: LocatorFilter): Locator;
     /** Scopes another CSS or semantic locator to descendants of this locator. */
     locator(selector: string | Locator): Locator;
+    getByRole(role: string, options?: {
+        name?: string;
+        exact?: boolean;
+    }): Locator;
+    getByText(text: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByLabel(label: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByPlaceholder(placeholder: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByAltText(text: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByTitle(title: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByTestId(testId: string): Locator;
     /** Intersects this query with another locator from the same tab. */
     and(other: Locator): Locator;
     /** Unions this query with another locator from the same tab. */

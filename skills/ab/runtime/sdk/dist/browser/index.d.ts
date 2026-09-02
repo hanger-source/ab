@@ -30,6 +30,7 @@ export type NavigateOptions = OperationOptions & {
     waitUntil?: "none" | "domcontentloaded" | "load";
     timeoutMs?: number;
 };
+export type LoadState = "domcontentloaded" | "load";
 export type ScreenshotOptions = OperationOptions & {
     fullPage?: boolean;
     scale?: ScreenshotScale;
@@ -190,6 +191,13 @@ export declare class Tab {
         text?: string;
         state?: "attached" | "detached" | "visible" | "hidden";
     }): Promise<void>;
+    /** Waits until the target URL contains a literal pattern or matches a `*` wildcard pattern. */
+    waitForURL(url: string, options?: OperationOptions): Promise<void>;
+    /**
+     * Waits for readiness of the document current when this request reaches the Runtime.
+     * This does not anticipate a future navigation or imply network/application readiness.
+     */
+    waitForLoadState(state?: LoadState, options?: OperationOptions): Promise<void>;
     /**
      * Atomically captures the requested AX state and screenshot.
      *

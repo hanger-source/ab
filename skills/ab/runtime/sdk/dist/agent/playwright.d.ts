@@ -1,29 +1,18 @@
 import type { Screenshot } from "../artifacts/index.js";
+import type { LoadState } from "../browser/index.js";
 import type { ElementHandle, ElementInspection, ElementInspectionOptions } from "../elements/index.js";
 import { Locator as CoreLocator, type LocatorActionOptions as CoreLocatorActionOptions, type LocatorClickOptions as CoreLocatorClickOptions, type LocatorFilter as CoreLocatorFilter, type LocatorResult, type LocatorWaitOptions as CoreLocatorWaitOptions, type SuggestionCommitOptions as CoreSuggestionCommitOptions, type SuggestionCommitResult } from "../locators/index.js";
 import type { TextInputActionData } from "../actions/result.js";
 import type { OperationOptions } from "../options.js";
-import { type ActionWrite, type WriteOptions } from "./ax.js";
-type OwnedActionOptions<T> = Omit<T, "observe" | "baseline">;
-export type LocatorActionOptions = OwnedActionOptions<CoreLocatorActionOptions> & {
-    write?: ActionWrite;
-};
-export type LocatorClickOptions = OwnedActionOptions<CoreLocatorClickOptions> & {
-    write?: ActionWrite;
-};
+type AgentActionOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
+export type LocatorActionOptions = AgentActionOptions<CoreLocatorActionOptions>;
+export type LocatorClickOptions = AgentActionOptions<CoreLocatorClickOptions>;
 export type LocatorTypeOptions = LocatorActionOptions & {
     clear?: boolean;
     delayMs?: number;
 };
-export type SuggestionCommitOptions = OwnedActionOptions<CoreSuggestionCommitOptions> & {
-    write?: ActionWrite;
-};
-export type LocatorWaitOptions = CoreLocatorWaitOptions & {
-    /** Present a fresh full state after the semantic wait succeeds. */
-    write?: "state" | "none";
-    /** Shape and deadline for the post-wait state capture. */
-    observation?: WriteOptions;
-};
+export type SuggestionCommitOptions = AgentActionOptions<CoreSuggestionCommitOptions>;
+export type LocatorWaitOptions = CoreLocatorWaitOptions;
 export type LocatorFilter = Omit<CoreLocatorFilter, "has"> & {
     has?: Locator;
 };
@@ -58,14 +47,45 @@ export declare class Playwright {
     }): Locator;
     getByTestId(testId: string): Locator;
     waitFor(options: PageWaitOptions): Promise<void>;
+    /** Waits for one explicit URL postcondition without presenting page state. */
+    waitForURL(url: string, options?: OperationOptions): Promise<void>;
+    /**
+     * Waits for readiness of the current document without anticipating a future navigation
+     * or implying application/business completion.
+     */
+    waitForLoadState(state?: LoadState, options?: OperationOptions): Promise<void>;
 }
-/** Immutable semantic Locator with Agent-owned action presentation. */
+/**
+ * Immutable semantic Locator with explicit post-action waits and observations.
+ * Design evidence:
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export declare class Locator {
     #private;
     private constructor();
     get query(): CoreLocator["query"];
     filter(filter: LocatorFilter): Locator;
     locator(selector: string | Locator): Locator;
+    getByRole(role: string, options?: {
+        name?: string;
+        exact?: boolean;
+    }): Locator;
+    getByText(text: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByLabel(label: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByPlaceholder(placeholder: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByAltText(text: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByTitle(title: string, options?: {
+        exact?: boolean;
+    }): Locator;
+    getByTestId(testId: string): Locator;
     and(other: Locator): Locator;
     or(other: Locator): Locator;
     inFrame(frameId: string): Locator;

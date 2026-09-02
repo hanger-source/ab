@@ -52,9 +52,21 @@ impl ObservationStore {
         let Some(id) = options.diff_from.as_deref() else {
             return Ok(None);
         };
-        self.get_owned(client_id, target_id, id, "observation.diff")
-            .await
-            .map(Some)
+        let previous = self
+            .get_owned(client_id, target_id, id, "observation.diff")
+            .await?;
+        // A diff compares two instances of one observation contract, not two
+        // arbitrary renderings. Design evidence:
+        // `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+        if !options.same_capture_shape(&previous.capture_options) {
+            return Err(AbError::new(
+                "observation_shape_mismatch",
+                "observation.diff.shape",
+                "a diff observation must use the same capture shape as its baseline",
+            )
+            .with_details(json!({ "baselineObservationId": id })));
+        }
+        Ok(Some(previous))
     }
 
     pub async fn get_owned(

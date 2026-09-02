@@ -107,6 +107,39 @@ export class Locator {
     });
   }
 
+  getByRole(role: string, options: { name?: string; exact?: boolean } = {}): Locator {
+    return this.#descendant({
+      kind: "role",
+      role,
+      ...(options.name === undefined ? {} : { name: options.name }),
+      exact: options.exact ?? false,
+    });
+  }
+
+  getByText(text: string, options: { exact?: boolean } = {}): Locator {
+    return this.#descendant({ kind: "text", value: text, exact: options.exact ?? false });
+  }
+
+  getByLabel(label: string, options: { exact?: boolean } = {}): Locator {
+    return this.#descendant({ kind: "label", value: label, exact: options.exact ?? false });
+  }
+
+  getByPlaceholder(placeholder: string, options: { exact?: boolean } = {}): Locator {
+    return this.#descendant({ kind: "placeholder", value: placeholder, exact: options.exact ?? false });
+  }
+
+  getByAltText(text: string, options: { exact?: boolean } = {}): Locator {
+    return this.#descendant({ kind: "altText", value: text, exact: options.exact ?? false });
+  }
+
+  getByTitle(title: string, options: { exact?: boolean } = {}): Locator {
+    return this.#descendant({ kind: "title", value: title, exact: options.exact ?? false });
+  }
+
+  getByTestId(testId: string): Locator {
+    return this.#descendant({ kind: "testId", value: testId, exact: false });
+  }
+
   /** Intersects this query with another locator from the same tab. */
   and(other: Locator): Locator {
     this.#assertCompatible(other);
@@ -250,9 +283,8 @@ export class Locator {
       };
     };
     const ax = new AX(this.#client, this.#tabId);
-    // The exact suggestion ref becomes the baseline of the final diff action.
-    // Preserve the caller's explicit capture shape from the first snapshot so
-    // Rust never has to weaken its shape-identity check. See
+    // Preserve one capture shape across the internal baseline and suggestion
+    // revisions so Rust never has to weaken its shape-identity check. See
     // `docs/evidence/20260902__action-resource-ownership__@codex.md`.
     const captureShape = actionOptions.observation ?? {
       mode: "interactive" as const,
@@ -310,7 +342,7 @@ export class Locator {
           throw new ABError({
             kind: "strict_violation",
             stage: "sdk.locator.autocomplete",
-            message: `autocomplete suggestion ${JSON.stringify(suggestionText)} matched ${ambiguousCandidates.length} newly presented item refs`,
+            message: `autocomplete suggestion ${JSON.stringify(suggestionText)} matched ${ambiguousCandidates.length} newly captured item refs`,
             details: { candidates: ambiguousCandidates.map(({ id, role, name }) => ({ id, role, name })) },
           });
         }
@@ -534,6 +566,10 @@ export class Locator {
     if (other.#client !== this.#client || other.#tabId !== this.#tabId) {
       throw new TypeError("Locators can only be composed within the same Browser and Tab");
     }
+  }
+
+  #descendant(query: LocatorQuery): Locator {
+    return this.locator(new Locator(this.#client, this.#tabId, query));
   }
 }
 

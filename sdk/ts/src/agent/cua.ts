@@ -1,15 +1,26 @@
 import {
   CUA as CoreCUA,
   type CuaActionData,
-  type CuaClickOptions,
-  type CuaDragOptions,
-  type CuaPoint,
-  type CuaWheelOptions,
+  type CuaClickOptions as CoreCuaClickOptions,
+  type CuaDragOptions as CoreCuaDragOptions,
+  type CuaPoint as CoreCuaPoint,
+  type CuaWheelOptions as CoreCuaWheelOptions,
 } from "../actions/cua.js";
 import type { ActionResult } from "../ax/index.js";
-import { AX, OBSERVATION_MAX_CHARS } from "./ax.js";
+import { AX, assertAgentActionOptions } from "./ax.js";
 
-/** Viewport input bound to the Agent's presented AX baseline. */
+type AgentCuaOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
+
+export type CuaPoint = AgentCuaOptions<CoreCuaPoint>;
+export type CuaClickOptions = AgentCuaOptions<CoreCuaClickOptions>;
+export type CuaWheelOptions = AgentCuaOptions<CoreCuaWheelOptions>;
+export type CuaDragOptions = AgentCuaOptions<CoreCuaDragOptions>;
+
+/**
+ * Viewport input whose coordinates must come from the currently visible
+ * viewport. CUA dispatch is separate from any later observation. See
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export class CUA {
   readonly #core: CoreCUA;
   readonly #ax: AX;
@@ -25,37 +36,31 @@ export class CUA {
   }
 
   click(options: CuaClickOptions): Promise<ActionResult<CuaActionData>> {
-    return this.#perform(options, (action) => this.#core.click(action as CuaClickOptions));
+    return this.#perform(options, (action) => this.#core.click(action as CoreCuaClickOptions));
   }
 
   move(options: CuaPoint): Promise<ActionResult<CuaActionData>> {
-    return this.#perform(options, (action) => this.#core.move(action as CuaPoint));
+    return this.#perform(options, (action) => this.#core.move(action as CoreCuaPoint));
   }
 
   wheel(options: CuaWheelOptions): Promise<ActionResult<CuaActionData>> {
-    return this.#perform(options, (action) => this.#core.wheel(action as CuaWheelOptions));
+    return this.#perform(options, (action) => this.#core.wheel(action as CoreCuaWheelOptions));
   }
 
   drag(options: CuaDragOptions): Promise<ActionResult<CuaActionData>> {
-    return this.#perform(options, (action) => this.#core.drag(action as CuaDragOptions));
+    return this.#perform(options, (action) => this.#core.drag(action as CoreCuaDragOptions));
   }
 
   async #perform<T extends CuaPoint | CuaDragOptions>(
     options: T,
-    action: (options: T) => Promise<ActionResult<CuaActionData>>,
+    action: (options: T & { observe: "none" }) => Promise<ActionResult<CuaActionData>>,
   ): Promise<ActionResult<CuaActionData>> {
-    const baseline = options.baseline ?? this.#ax.actionBaseline();
-    const requested = options.observe ?? "none";
-    const observe = requested === "diff" && !baseline ? "state" : requested;
+    assertAgentActionOptions(options);
     const result = await action({
       ...options,
-      observe,
-      ...(observe === "diff" ? { baseline: baseline! } : {}),
-      ...(observe === "state" && options.observation === undefined
-        ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
-        : {}),
+      observe: "none",
     });
-    await this.#ax.presentActionResult(result, observe === "none" ? "none" : observe);
+    this.#ax.applyActionResult(result);
     return result;
   }
 }

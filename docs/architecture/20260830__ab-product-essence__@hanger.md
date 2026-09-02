@@ -98,7 +98,7 @@ Skill 不是 API 清单。它规定 Agent 的默认路径：
 4. 稳定、重复的结构才转成 Locator；
 5. canvas、地图、远程桌面等视觉目标才使用 screenshot + CUA；
 6. `evaluate()` 与 raw CDP 用于提取特殊事实和诊断，不作为普通找元素路径；
-7. 动作后 `write()` diff 或最小必要观察，不盲重试同一动作。
+7. 动作只返回动作事实；随后显式等待下一步真正需要的 URL、load、元素或 Resource 条件，只有模型需要重新决策时才 `write()` diff/state，不盲重试同一动作。
 
 Skill 不调用模型 API，项目本身也不需要 OpenAI Key。模型 token 只来自正在运行的 Agent；Rust Server、SDK 和观察引擎都是确定性本地代码。
 

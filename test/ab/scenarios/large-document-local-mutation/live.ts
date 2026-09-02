@@ -38,7 +38,7 @@ try {
   await tab.playwright.waitFor({ selector: "#field-449", state: "attached", timeoutMs: 10_000 });
 
   try {
-    await tab.ax.write("state", { mode: "full", surface: "active", timeoutMs: 20_000 });
+    var baseline = await tab.ax.write("state", { mode: "full", surface: "active", timeoutMs: 20_000 });
   } catch (error) {
     console.error(JSON.stringify({
       scenario: "large-document-local-mutation",
@@ -49,8 +49,6 @@ try {
     }, null, 2));
     throw error;
   }
-  const baseline = tab.ax.actionBaseline();
-  assert(baseline, "Agent did not retain the successfully presented state");
   assert.equal(baseline.truncated, true, "fixture did not exceed the Agent text budget");
   assert(baseline.text.length <= 24_100, `Agent state exceeded its budget: ${baseline.text.length}`);
   assert(baseline.refs().length >= 400, `fixture exposed only ${baseline.refs().length} refs`);
@@ -75,11 +73,12 @@ try {
   const started = performance.now();
   const action = await tab.playwright.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
   const elapsedMs = Math.round(performance.now() - started);
-  const current = tab.ax.actionBaseline();
-  assert(current, "Agent did not advance its presented baseline after the action");
-  assert.equal(action.observation?.id, current.id);
+  assert.equal(action.observation, null);
+  assert.equal(action.observationOutcome.status, "notRequested");
+  assert.equal(baseline.disposed, false, "action replaced the presented baseline");
+  const current = await tab.ax.write("diff");
   assert.equal(current.documentGeneration, baselineSummary.documentGeneration);
-  assert(current.diff, "Agent action did not return a diff observation");
+  assert(current.diff, "explicit Agent observation did not return a diff");
 
   const stableAfter = current.refs().find((ref) => ref.name === stableBefore.name);
   assert.equal(stableAfter?.id, stableBefore.id, "unchanged late node received a different ref ID");
@@ -93,14 +92,12 @@ try {
   );
   assert.equal(presentations.at(-1)?.text, current.diff.text);
 
-  await tab.ax.write("state", {
+  const interactiveBaseline = await tab.ax.write("state", {
     mode: "interactive",
     surface: "active",
     maxChars: 24_000,
     timeoutMs: 20_000,
   });
-  const interactiveBaseline = tab.ax.actionBaseline();
-  assert(interactiveBaseline, "Agent did not retain the interactive presentation");
   assert(
     !interactiveBaseline.text.includes("StaticText"),
     "interactive fixture unexpectedly contains full-tree StaticText output",
@@ -108,9 +105,11 @@ try {
   const interactiveStarted = performance.now();
   const interactiveAction = await tab.playwright.getByText("Toggle local detail", { exact: true }).click({ timeoutMs: 5_000 });
   const interactiveElapsedMs = Math.round(performance.now() - interactiveStarted);
-  const interactiveCurrent = tab.ax.actionBaseline();
-  assert(interactiveCurrent?.diff, "interactive Agent action did not return a diff observation");
-  assert.equal(interactiveAction.observation?.id, interactiveCurrent.id);
+  assert.equal(interactiveAction.observation, null);
+  assert.equal(interactiveAction.observationOutcome.status, "notRequested");
+  assert.equal(interactiveBaseline.disposed, false, "action replaced the interactive baseline");
+  const interactiveCurrent = await tab.ax.write("diff");
+  assert(interactiveCurrent.diff, "explicit interactive observation did not return a diff");
   assert(
     interactiveCurrent.diff.text.length < 5_000,
     `interactive baseline produced a ${interactiveCurrent.diff.text.length}-character Agent diff`,

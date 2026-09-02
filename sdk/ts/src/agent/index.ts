@@ -9,14 +9,20 @@ export {
 export {
   AX,
   type AXContent,
+  type AXWriteContent,
   type WriteOptions,
-  type ActionWrite,
   type RefActionOptions,
   type ClickActionOptions,
   type TypeActionOptions,
 } from "./ax.js";
 
-export { CUA } from "./cua.js";
+export {
+  CUA,
+  type CuaPoint,
+  type CuaClickOptions,
+  type CuaWheelOptions,
+  type CuaDragOptions,
+} from "./cua.js";
 export { Dev } from "./dev.js";
 export { Resources } from "./resources.js";
 
@@ -42,3 +48,4 @@ export {
 } from "./presentation.js";
 
 export type { DocumentationTopic } from "./documentation.js";
+export type { LoadState } from "../browser/index.js";

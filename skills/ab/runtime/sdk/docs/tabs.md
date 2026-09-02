@@ -49,7 +49,7 @@ If an operation can open a popup, capture the baseline before the trigger and co
 
 ```js
 const before = new Set((await browser.tabs.list()).map(value => value.id));
-await opener.click({ write: "none" });
+await opener.click();
 const after = await browser.tabs.list();
 const opened = after.filter(value => !before.has(value.id));
 for (const child of opened) taskTabs.add(child.id);
@@ -65,6 +65,8 @@ Inspect each new candidate by id, URL/title, opener context, and fresh AX state 
 - `activate(options)`: make a tab visibly active.
 - `refresh(options)`: refresh SDK metadata only; it does not reload the page.
 - `waitFor({ selector, text, state, timeoutMs, signal })`: wait for an explicit page condition.
+- `playwright.waitForURL(pattern, options)`: wait for current target URL to match a substring or `*` wildcard pattern.
+- `playwright.waitForLoadState(state, options)`: wait for `domcontentloaded` or `load`; it does not imply application readiness.
 - `close(options)`: close that target; use only for task-owned tabs or an explicitly requested close.
 
 Navigation methods update `tab.url`, `tab.title`, and `tab.active` through `refresh()`. They do not update local frame, realm, AX, element, screenshot, or resource objects held elsewhere.

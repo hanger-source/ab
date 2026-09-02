@@ -68,7 +68,8 @@ try {
     "an action without a post-action observation must not wait for application route data",
   );
   assert.equal(actionOnly.observation, null);
-  await waitForPath(browser, actionOnlyTab.id, "/destination");
+  await actionOnlyTab.waitForURL("/destination", { timeoutMs: 2_000 });
+  assert.equal(new URL((await browser.tabs.get(actionOnlyTab.id)).url).pathname, "/destination");
 
   const tab = await browser.tabs.open(`http://127.0.0.1:${address.port}`);
   const baseline = await tab.ax.snapshot({ mode: "full", surface: "active" });
@@ -131,18 +132,4 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   assert(value, `${name} is required`);
   return value;
-}
-
-async function waitForPath(
-  browser: Awaited<ReturnType<typeof connect>>,
-  targetId: string,
-  pathname: string,
-): Promise<void> {
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    const current = await browser.tabs.get(targetId);
-    if (new URL(current.url).pathname === pathname) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.fail(`tab ${targetId} did not reach ${pathname}`);
 }

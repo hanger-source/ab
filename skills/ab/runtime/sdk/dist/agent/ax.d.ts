@@ -2,22 +2,24 @@ import type { Screenshot, ScreenshotScale } from "../artifacts/index.js";
 import type { PageObservation } from "../browser/index.js";
 import { type ActionResult, type AXState, type ClickOptions, type RefActionOptions as CoreRefActionOptions, type SnapshotOptions, type TypeOptions } from "../ax/index.js";
 import type { TextInputActionData } from "../actions/result.js";
+import type { OperationOptions } from "../options.js";
 export type AXContent = "state" | "screenshot" | "both";
+export type AXWriteContent = AXContent | "diff";
 export type WriteOptions = SnapshotOptions & {
     fullPage?: boolean;
     scale?: ScreenshotScale;
 };
-export type ActionWrite = "diff" | "state" | "none";
-type OwnedActionOptions<T> = Omit<T, "observe" | "baseline">;
-export type RefActionOptions = OwnedActionOptions<CoreRefActionOptions> & {
-    write?: ActionWrite;
-};
-export type ClickActionOptions = OwnedActionOptions<ClickOptions> & {
-    write?: ActionWrite;
-};
-export type TypeActionOptions = OwnedActionOptions<TypeOptions> & {
-    write?: ActionWrite;
-};
+type AgentActionOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
+export type RefActionOptions = AgentActionOptions<CoreRefActionOptions>;
+export type ClickActionOptions = AgentActionOptions<ClickOptions>;
+export type TypeActionOptions = AgentActionOptions<TypeOptions>;
+/**
+ * Agent-facing AX observation and short-ref actions.
+ *
+ * Actions deliberately do not capture or present post-action state. The Agent
+ * chooses an explicit wait or `write()` at the next decision boundary. See
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export declare class AX {
     #private;
     private constructor();
@@ -25,12 +27,13 @@ export declare class AX {
     get(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
     get(content: "both", options?: WriteOptions): Promise<PageObservation>;
     write(content: "state", options?: WriteOptions): Promise<AXState>;
+    write(content: "diff", options?: OperationOptions): Promise<AXState>;
     write(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
     write(content: "both", options?: WriteOptions): Promise<{
         state: AXState;
         screenshot: Screenshot;
     }>;
-    write(content: AXContent, options?: WriteOptions): Promise<AXState | Screenshot | {
+    write(content: AXWriteContent, options?: WriteOptions): Promise<AXState | Screenshot | {
         state: AXState;
         screenshot: Screenshot;
     }>;

@@ -109,6 +109,7 @@ export {
   Tabs,
   type BrowserIdentity,
   type FrameInfo,
+  type LoadState,
   type NavigateOptions,
   type ObserveOptions,
   type PageObservation,

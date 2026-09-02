@@ -6,14 +6,14 @@ Before START, read only the operation topics the episode is likely to need, buil
 
 Use one managed JavaScript cell for each already-determined timed sequence. If it yields a running cell id, wait on that exact cell with the shortest practical MCP yield. Tool yield is not an AB timeout.
 
-Inside a countdown of roughly one minute or less, the default Agent action diff reuses the already presented baseline and captures only the post-action AX state. When several consecutive operations are already determined and no intermediate model decision is needed, suppress those intermediate observations and take one bounded fresh state at the next decision point:
+Inside a countdown of roughly one minute or less, keep action dispatch separate from observation. When several consecutive operations are already determined and no intermediate model decision is needed, perform them without intermediate observations and take one bounded fresh state at the next decision point:
 
 ```js
-await start.click({ write: "none", timeoutMs: 2_000 });
+await start.click({ timeoutMs: 2_000 });
 await tab.ax.write("state", { timeoutMs: 2_000, maxChars: 24_000 });
 ```
 
-Repeat only when the next choice requires new page state. Put consecutive, already-determined Locator operations in one JavaScript cell with `write: "none"`; mechanically verify committed field values inside the expression and return to the model only at the first genuinely new decision or final result. If the dispatch returns `outcome_unknown`, do one bounded observation to determine whether it happened; never replay it from the error alone.
+Repeat only when the next choice requires new page state. Put consecutive, already-determined Locator operations in one JavaScript cell; mechanically verify committed field values inside the expression and return to the model only at the first genuinely new decision or final result. If the dispatch returns `outcome_unknown`, do one bounded observation to determine whether it happened; never replay it from the error alone.
 
 These recipes combine AB primitives into complete Agent loops. They are patterns, not permission to perform actions outside the user's request.
 
@@ -22,8 +22,8 @@ These recipes combine AB primitives into complete Agent loops. They are patterns
 ```js
 const state = await tab.ax.write("state", { maxChars: 24_000 });
 // Choose a displayed ref from the presented state.
-await tab.ax.click("e7", { write: "diff" });
-await tab.ax.write("state");
+await tab.ax.click("e7");
+await tab.ax.write("diff");
 ```
 
 Start with the Agent facade's full AX state so page instructions and status text are visible with the refs. Use interactive mode only as a deliberate compact view after the surrounding context is known. Do not begin with `querySelector` exploration.
@@ -32,8 +32,8 @@ Start with the Agent facade's full AX state so page instructions and status text
 
 ```js
 const row = tab.playwright.getByRole("row").filter({ hasText: "Order 1042", visible: true });
-await row.locator(tab.playwright.getByRole("button", { name: "Open", exact: true })).click({ write: "diff" });
-await tab.playwright.getByRole("heading", { name: "Order 1042", exact: true }).count();
+await row.locator(tab.playwright.getByRole("button", { name: "Open", exact: true })).click();
+await tab.playwright.getByRole("heading", { name: "Order 1042", exact: true }).waitFor();
 ```
 
 Locators are immutable query plans and resolve at use time. Keep the business identity in the query instead of depending on the current AX ref number.
@@ -42,7 +42,7 @@ Locators are immutable query plans and resolve at use time. Keep the business id
 
 ```js
 await tab.playwright.getByLabel("Email", { exact: true }).fill("agent@example.com");
-await tab.playwright.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
+await tab.playwright.getByRole("button", { name: "Save", exact: true }).click();
 await tab.playwright.waitFor({ text: "Saved", timeoutMs: 15_000 });
 await tab.ax.write("state");
 ```
@@ -70,26 +70,28 @@ const dateIsReadonly = dateState.readOnly;
 await from.fillAndSelectSuggestion(
   "POU",
   "POU",
-  { expectedValue: "POU", timeoutMs: 4_000, write: "none" },
+  { expectedValue: "POU", timeoutMs: 4_000 },
 );
 
 await to.fillAndSelectSuggestion(
   "HNM",
   "HNM",
-  { expectedValue: "HNM", timeoutMs: 4_000, write: "none" },
+  { expectedValue: "HNM", timeoutMs: 4_000 },
 );
 
 if (dateIsReadonly) {
   await date.click();
+  await tab.ax.write("state");
   await tab.ax.click("<fresh-exact-day-ref>");
   await date.inputValue();
 }
 
 // This Locator resolves after the popup rerenders; an old AX ref does not.
-await submit.click({ write: "diff" });
+await submit.click();
+await tab.ax.write("state");
 ```
 
-The airport names and ref ids above are placeholders for values actually shown by the current page observation. An action-produced diff is immediate and may precede delayed popup work. The invariant is the sequence: stable Locator, explicit semantic option wait, newly presented full state, exact option, committed-value check, then a fresh-resolving submit Locator.
+The airport names and ref ids above are placeholders for values actually shown by the current page observation. The invariant is the sequence: stable Locator, explicit semantic option wait, explicitly presented full state when model choice is needed, exact option, committed-value check, then a fresh-resolving submit Locator.
 
 ## Observe a request caused by UI
 
@@ -139,8 +141,8 @@ await tab.cua.click({
   y: 220,
   viewportId: page.screenshot.viewportId,
   clickCount: 2,
-  observe: "diff",
 });
+await tab.ax.write("diff");
 await page.state.dispose();
 await page.screenshot.dispose();
 ```
@@ -157,7 +159,7 @@ For “increase/decrease/add/remove” tasks, first read the exact current value
 const quantity = row.getByRole("textbox", { name: "Quantity", exact: true });
 const before = Number(await quantity.inputValue());
 const after = before + requestedIncrease;
-await quantity.fill(String(after), { write: "none" });
+await quantity.fill(String(after));
 if (Number(await quantity.inputValue()) !== after) throw new Error("quantity did not commit");
 ```
 

@@ -80,16 +80,13 @@ impl SelectorEngine {
             None if count == 1 => 0,
             None => {
                 let candidates = candidate_diagnostics(context, &matches).await;
-                return Err(AbError::new(
-                    "strict_violation",
-                    "selector.strict",
-                    format!("locator matched {count} elements; action requires exactly one"),
-                )
-                .with_details(json!({
-                    "count": count,
-                    "candidates": candidates,
-                    "truncated": count > candidates.len(),
-                })));
+                let message = strict_violation_message(count, &candidates);
+                return Err(AbError::new("strict_violation", "selector.strict", message)
+                    .with_details(json!({
+                        "count": count,
+                        "candidates": candidates,
+                        "truncated": count > candidates.len(),
+                    })));
             }
         };
         let selected = usize::try_from(selected_index)
@@ -177,6 +174,48 @@ async fn candidate_diagnostics(context: &TargetContext, matches: &[ElementTarget
         diagnostics.push(candidate);
     }
     diagnostics
+}
+
+fn strict_violation_message(count: usize, candidates: &[Value]) -> String {
+    const VISIBLE_CANDIDATES: usize = 6;
+    let mut message = format!("locator matched {count} elements; action requires exactly one");
+    for candidate in candidates.iter().take(VISIBLE_CANDIDATES) {
+        let index = candidate.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let tag_name = candidate
+            .get("tagName")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("element");
+        let role = candidate
+            .get("role")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let name = candidate
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        let test_id = candidate
+            .get("attributes")
+            .and_then(Value::as_object)
+            .and_then(|attributes| attributes.get("data-testid"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        message.push_str(&format!("\n  {index}) <{tag_name}>"));
+        if let Some(role) = role {
+            message.push_str(&format!(" role={role:?}"));
+        }
+        if let Some(name) = name {
+            message.push_str(&format!(" name={name:?}"));
+        }
+        if let Some(test_id) = test_id {
+            message.push_str(&format!(" data-testid={test_id:?}"));
+        }
+    }
+    if count > VISIBLE_CANDIDATES {
+        message.push_str(&format!("\n  … and {} more", count - VISIBLE_CANDIDATES));
+    }
+    message.push_str("\nRefine the locator by scope or semantic identity; use nth()/first()/last() only when order is the intended identity.");
+    message
 }
 
 async fn scopes(context: &TargetContext, frame_id: Option<&str>) -> AbResult<Vec<Scope>> {

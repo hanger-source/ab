@@ -1,6 +1,15 @@
-import { type CuaActionData, type CuaClickOptions, type CuaDragOptions, type CuaPoint, type CuaWheelOptions } from "../actions/cua.js";
+import { type CuaActionData, type CuaClickOptions as CoreCuaClickOptions, type CuaDragOptions as CoreCuaDragOptions, type CuaPoint as CoreCuaPoint, type CuaWheelOptions as CoreCuaWheelOptions } from "../actions/cua.js";
 import type { ActionResult } from "../ax/index.js";
-/** Viewport input bound to the Agent's presented AX baseline. */
+type AgentCuaOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
+export type CuaPoint = AgentCuaOptions<CoreCuaPoint>;
+export type CuaClickOptions = AgentCuaOptions<CoreCuaClickOptions>;
+export type CuaWheelOptions = AgentCuaOptions<CoreCuaWheelOptions>;
+export type CuaDragOptions = AgentCuaOptions<CoreCuaDragOptions>;
+/**
+ * Viewport input whose coordinates must come from the currently visible
+ * viewport. CUA dispatch is separate from any later observation. See
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export declare class CUA {
     #private;
     private constructor();
@@ -9,4 +18,5 @@ export declare class CUA {
     wheel(options: CuaWheelOptions): Promise<ActionResult<CuaActionData>>;
     drag(options: CuaDragOptions): Promise<ActionResult<CuaActionData>>;
 }
+export {};
 //# sourceMappingURL=cua.d.ts.map

@@ -227,6 +227,8 @@ await tab.ax.click("e12");
 
 Skill 默认只教 `@hanger-source/ab/agent`。需要完整类型、显式 observation 生命周期、资源编排或构建程序时直接使用 `@hanger-source/ab` Core；两层最终都发送同一组带 identity 的 AB RPC。
 
+Agent facade 把 action、wait 与 observation 作为三个显式决策面。AX ref、Locator 与 CUA mutation 只请求 `observe: "none"`，返回 Rust 的动作事实而不自动采集或展示页面；URL/load/元素/resource 条件由相应 wait 或预先建立的 Resource 表达；模型需要下一次页面决策时再调用 `ax.write("diff" | "state")`。Core 仍允许库调用者显式选择 action-and-observation transaction，但该能力不构成 Agent 默认合同。设计依据见 `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`。
+
 ### 6.2 `get()`、`write()` 与展示基线
 
 Agent AX 表面固定为：

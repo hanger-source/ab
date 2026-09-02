@@ -2,7 +2,7 @@
 
 Browser lifecycle readiness and application readiness are different facts. `domcontentloaded` proves that the new document parsed; `load` proves its load event fired. Neither proves that a SPA finished rendering, data loaded, authentication succeeded, or a submitted operation completed.
 
-Action completion and application readiness are also different facts. An action without a requested post-action observation still records navigation, dialog, and file-chooser signals, but it does not wait for source-page XHR/Fetch or render settlement. An action that requests an observation uses a separately armed bounded effect stream before capture. Neither mode replaces an explicit wait for the business fact the next decision needs.
+Action completion and application readiness are also different facts. Agent actions record action-owned navigation and dialog facts but do not wait for source-page XHR/Fetch, render settlement, or AX capture. Core callers can deliberately request a bounded post-action observation transaction, but that still does not replace an explicit wait for the business fact the next decision needs.
 
 ## Navigate deliberately
 
@@ -32,17 +32,29 @@ await tab.playwright.getByRole("heading", { name: "Ready", exact: true }).waitFo
 
 Both forms execute through Rust's SelectorEngine in the main frame; they do not call page-world `querySelector`. Locator waits keep the Locator's explicit frame scope. States are `attached`, `detached`, `visible`, and `hidden`; `hidden` also succeeds after detachment.
 
+For URL and document lifecycle facts:
+
+```js
+await tab.playwright.waitForURL("/orders/1042", { timeoutMs: 20_000 });
+await tab.playwright.waitForLoadState("domcontentloaded", { timeoutMs: 20_000 });
+```
+
+`waitForURL()` accepts a literal substring or a `*` wildcard pattern. `waitForLoadState()` accepts `"domcontentloaded"` or `"load"`. These waits do not capture or present AX state and do not mean network idle or business completion.
+
+`waitForLoadState()` observes the document that is current when the call reaches the Runtime. Do not place it by itself after a click that might start a new-document navigation: the old document may already satisfy `"load"`. When the destination URL is distinct, wait for that URL first and then wait for its load state. AB does not currently expose a race-free `expectNavigation(action)` primitive for same-URL reloads or events that must be armed before the action; do not simulate one with a fixed sleep or claim that an after-action load check cannot race.
+
 For UI state with changing structure, repeatedly take bounded AX states and inspect their identity rather than repeatedly guessing selectors. For network or console facts, open the corresponding resource before the triggering action and wait on that resource.
 
 Do not use arbitrary sleep as the primary readiness mechanism. A delay neither proves the expected fact nor distinguishes a slow page from a failed page.
 
 ## Actions that may navigate
 
-An action result can report a semantic diff, but the navigation and application result still need observation. A safe sequence is:
+An action result reports dispatch and immediate browser facts. Select the postcondition and observation separately:
 
 ```js
-await tab.ax.click("e12", { write: "diff", timeoutMs: 15_000 });
-await tab.refresh();
+await tab.ax.click("e12", { timeoutMs: 15_000 });
+await tab.playwright.waitForURL("/orders/", { timeoutMs: 15_000 });
+await tab.playwright.waitForLoadState("domcontentloaded", { timeoutMs: 15_000 });
 await tab.ax.write("state");
 ```
 

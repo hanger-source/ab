@@ -17,7 +17,8 @@ const tabs = await browser.tabs.list();
 ```js
 const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
 await tab.ax.write("state", { mode: "interactive", maxChars: 24_000 });
-await tab.ax.click("e4", { write: "diff" });
+await tab.ax.click("e4");
+await tab.ax.write("diff");
 ```
 
 `write()` 成功后才建立当前 Agent session + tab 的展示基线。短 ref 在发往 Rust 前还原成明确 observation id + ref id；document 或节点变化时硬失败，不按文本寻找相似替代元素。
@@ -26,7 +27,7 @@ await tab.ax.click("e4", { write: "diff" });
 
 ```js
 await tab.playwright.getByLabel("邮箱").fill("user@example.com");
-await tab.playwright.getByRole("button", { name: "登录" }).click({ write: "diff" });
+await tab.playwright.getByRole("button", { name: "登录" }).click();
 await tab.ax.write("state");
 ```
 

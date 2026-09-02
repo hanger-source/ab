@@ -367,6 +367,18 @@ export class Tab {
             timeoutMs: options.timeoutMs ?? 30_000,
         }, { target: { tabId: this.id }, ...options });
     }
+    /** Waits until the target URL contains a literal pattern or matches a `*` wildcard pattern. */
+    async waitForURL(url, options = {}) {
+        const result = await this.#client.request("tab.waitForURL", { url }, { target: { tabId: this.id }, ...options });
+        this.#url = result.url;
+    }
+    /**
+     * Waits for readiness of the document current when this request reaches the Runtime.
+     * This does not anticipate a future navigation or imply network/application readiness.
+     */
+    async waitForLoadState(state = "load", options = {}) {
+        await this.#client.request("tab.waitForLoadState", { state }, { target: { tabId: this.id }, ...options });
+    }
     /**
      * Atomically captures the requested AX state and screenshot.
      *

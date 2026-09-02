@@ -1,3 +1,4 @@
+var _a;
 import { inspect } from "node:util";
 import { Screenshot } from "../artifacts/index.js";
 import { ElementHandle, } from "../elements/index.js";
@@ -31,7 +32,7 @@ export class Locator {
         if (filter.hasText !== undefined) {
             query = { kind: "hasText", query, value: filter.hasText, exact: filter.exact ?? false };
         }
-        return new Locator(this.#client, this.#tabId, query, {
+        return new _a(this.#client, this.#tabId, query, {
             ...(this.#index === undefined ? {} : { index: this.#index }),
             ...(visible === undefined ? {} : { visible }),
         });
@@ -39,34 +40,60 @@ export class Locator {
     /** Scopes another CSS or semantic locator to descendants of this locator. */
     locator(selector) {
         const descendant = typeof selector === "string"
-            ? new Locator(this.#client, this.#tabId, { kind: "css", value: selector })
+            ? new _a(this.#client, this.#tabId, { kind: "css", value: selector })
             : selector;
         this.#assertCompatible(descendant);
-        return new Locator(this.#client, this.#tabId, {
+        return new _a(this.#client, this.#tabId, {
             kind: "descendant",
             ancestor: this.query,
             descendant: descendant.query,
         });
     }
+    getByRole(role, options = {}) {
+        return this.#descendant({
+            kind: "role",
+            role,
+            ...(options.name === undefined ? {} : { name: options.name }),
+            exact: options.exact ?? false,
+        });
+    }
+    getByText(text, options = {}) {
+        return this.#descendant({ kind: "text", value: text, exact: options.exact ?? false });
+    }
+    getByLabel(label, options = {}) {
+        return this.#descendant({ kind: "label", value: label, exact: options.exact ?? false });
+    }
+    getByPlaceholder(placeholder, options = {}) {
+        return this.#descendant({ kind: "placeholder", value: placeholder, exact: options.exact ?? false });
+    }
+    getByAltText(text, options = {}) {
+        return this.#descendant({ kind: "altText", value: text, exact: options.exact ?? false });
+    }
+    getByTitle(title, options = {}) {
+        return this.#descendant({ kind: "title", value: title, exact: options.exact ?? false });
+    }
+    getByTestId(testId) {
+        return this.#descendant({ kind: "testId", value: testId, exact: false });
+    }
     /** Intersects this query with another locator from the same tab. */
     and(other) {
         this.#assertCompatible(other);
-        return new Locator(this.#client, this.#tabId, { kind: "and", left: this.query, right: other.query });
+        return new _a(this.#client, this.#tabId, { kind: "and", left: this.query, right: other.query });
     }
     /** Unions this query with another locator from the same tab. */
     or(other) {
         this.#assertCompatible(other);
-        return new Locator(this.#client, this.#tabId, { kind: "or", left: this.query, right: other.query });
+        return new _a(this.#client, this.#tabId, { kind: "or", left: this.query, right: other.query });
     }
     /** Restricts this query to an explicit frame identity. */
     inFrame(frameId) {
-        return new Locator(this.#client, this.#tabId, { kind: "frame", frameId, query: this.query });
+        return new _a(this.#client, this.#tabId, { kind: "frame", frameId, query: this.query });
     }
     nth(index) {
         if (!Number.isInteger(index)) {
             throw new TypeError("Locator.nth(index) requires an integer");
         }
-        return new Locator(this.#client, this.#tabId, this.query, {
+        return new _a(this.#client, this.#tabId, this.query, {
             index,
             ...(this.#visible === undefined ? {} : { visible: this.#visible }),
         });
@@ -149,9 +176,8 @@ export class Locator {
             };
         };
         const ax = new AX(this.#client, this.#tabId);
-        // The exact suggestion ref becomes the baseline of the final diff action.
-        // Preserve the caller's explicit capture shape from the first snapshot so
-        // Rust never has to weaken its shape-identity check. See
+        // Preserve one capture shape across the internal baseline and suggestion
+        // revisions so Rust never has to weaken its shape-identity check. See
         // `docs/evidence/20260902__action-resource-ownership__@codex.md`.
         const captureShape = actionOptions.observation ?? {
             mode: "interactive",
@@ -208,7 +234,7 @@ export class Locator {
                     throw new ABError({
                         kind: "strict_violation",
                         stage: "sdk.locator.autocomplete",
-                        message: `autocomplete suggestion ${JSON.stringify(suggestionText)} matched ${ambiguousCandidates.length} newly presented item refs`,
+                        message: `autocomplete suggestion ${JSON.stringify(suggestionText)} matched ${ambiguousCandidates.length} newly captured item refs`,
                         details: { candidates: ambiguousCandidates.map(({ id, role, name }) => ({ id, role, name })) },
                     });
                 }
@@ -369,7 +395,11 @@ export class Locator {
             throw new TypeError("Locators can only be composed within the same Browser and Tab");
         }
     }
+    #descendant(query) {
+        return this.locator(new _a(this.#client, this.#tabId, query));
+    }
 }
+_a = Locator;
 function freezeQuery(query) {
     const clone = JSON.parse(JSON.stringify(query));
     return deepFreeze(clone);

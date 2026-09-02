@@ -10,5 +10,5 @@
 //! persistent-profile lifecycle.
 
 pub use agent_browser::native::{
-    cdp, diff, element, interaction, pointer_action, screenshot, snapshot,
+    actions, cdp, diff, element, interaction, pointer_action, screenshot, snapshot,
 };

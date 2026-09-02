@@ -788,6 +788,21 @@ async fn dispatch(
                 )
                 .await
         }
+        "tab.waitForURL" => {
+            let pattern = required_string(&params, "url", "tab.waitForURL")?;
+            browser
+                .wait_for_url(required_target(target_id)?, pattern, request_deadline)
+                .await
+        }
+        "tab.waitForLoadState" => {
+            let load_state = params
+                .get("state")
+                .and_then(Value::as_str)
+                .unwrap_or("load");
+            browser
+                .wait_for_load_state(required_target(target_id)?, load_state, request_deadline)
+                .await
+        }
         "resource.open" => {
             let kind = required_string(&params, "kind", "resource.open")?;
             let resource_params = params.get("options").cloned().unwrap_or_else(|| json!({}));
@@ -961,6 +976,8 @@ fn may_have_side_effect(request: &Request) -> bool {
         | "tab.screenshot"
         | "tab.observe"
         | "tab.waitFor"
+        | "tab.waitForURL"
+        | "tab.waitForLoadState"
         | "observation.snapshot" => false,
         "action.perform" => request
             .params

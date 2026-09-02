@@ -75,6 +75,8 @@ tab.reload(options?)
 tab.goBack(options?)
 tab.goForward(options?)
 tab.playwright.waitFor({ selector?, text?, state?: "attached" | "detached" | "visible" | "hidden", timeoutMs?, signal? })
+tab.playwright.waitForURL(pattern, { timeoutMs?, signal? })
+tab.playwright.waitForLoadState(state?: "domcontentloaded" | "load", { timeoutMs?, signal? })
 tab.close(options?)
 ```
 
@@ -90,6 +92,7 @@ tab.ax.get("screenshot", options?): Promise<Screenshot>
 tab.ax.get("both", options?): Promise<PageObservation>
 
 tab.ax.write("state", options?): Promise<AXState>
+tab.ax.write("diff", options?): Promise<AXState>
 tab.ax.write("screenshot", options?): Promise<Screenshot>
 tab.ax.write("both", options?): Promise<{ state: AXState, screenshot: Screenshot }>
 
@@ -110,7 +113,7 @@ tab.ax.dragTo(sourceRefId, targetRefId, options?)
 tab.ax.scrollIntoView(refId, options?)
 ```
 
-`get()` returns caller-owned typed data and never displays or changes the presented baseline. `write()` returns the exact typed object it presented; `write("state"|"both")` advances the current Agent-session/tab baseline only after Presenter success, while `write("screenshot")` does not. A short-ref action resolves that baseline locally, then sends explicit `observationId + refId` to Rust. No baseline means `agent_observation_required`; there is no server-global ref map or guessed replacement.
+`get()` returns caller-owned typed data and never displays or changes the presented baseline. `write()` returns the exact typed object it presented; `write("state"|"diff"|"both")` advances the current Agent-session/tab baseline only after Presenter success, while `write("screenshot")` does not. `write("diff")` captures a new explicit state against the last presented state using the same capture shape. A short-ref action resolves that baseline locally, then sends explicit `observationId + refId` to Rust. No baseline means `agent_observation_required`; there is no server-global ref map or guessed replacement.
 
 ## Core AX state and refs
 
@@ -179,7 +182,7 @@ type ActionOptions = {
 };
 ```
 
-When `observe:"diff"` is selected, Core callers pass an existing `baseline`; Rust captures only the post-action state and compares it to that explicit identity. `AXRef` supplies its owning observation automatically. When `observation` is omitted, the post-action capture inherits the baseline's exact shape; an explicitly conflicting shape is rejected before dispatch. `observe:"state"` captures only the post-action state. Both observation modes arm application-effect settlement before input dispatch. `observe:"none"` skips that settlement and capture while retaining action-owned navigation, dialog, and file-chooser reporting. `@hanger-source/ab/agent` state-changing short-ref, Locator, and CUA actions reuse the last successfully presented state and its exact capture shape. A first action without a presented baseline, or an explicit `write:"state"`, uses the bounded Agent full-state shape.
+When `observe:"diff"` is selected, Core callers pass an existing `baseline`; Rust captures only the post-action state and compares it to that explicit identity. `AXRef` supplies its owning observation automatically. When `observation` is omitted, the post-action capture inherits the baseline's exact shape; an explicitly conflicting shape is rejected before dispatch. `observe:"state"` captures only the post-action state. Both observation modes arm application-effect settlement before input dispatch. `observe:"none"` skips that settlement and capture while retaining action-owned navigation, dialog, and file-chooser reporting. `@hanger-source/ab/agent` actions always call Core with `observe:"none"`; post-action waits and observations are explicit Agent decisions. Core observation options remain available only through the Core entry point.
 
 All AXRef, Locator, and ElementHandle mutations return the same `ActionResult`:
 
@@ -234,7 +237,7 @@ When AX and screenshot are both requested, Rust captures and validates them as o
 
 ## Locators
 
-`@hanger-source/ab/agent` returns `Locator` from every `tab.playwright` semantic builder. It has the same immutable composition and read methods as Core Locator. Mutation options use `write?: "diff" | "state" | "none"`; the default is `"diff"` for state-changing operations and `"none"` for hover/focus/wheel/scroll. Agent actions deliberately do not expose Core `observe` or `baseline`: the Agent owns the exact presented observation, and runtime JavaScript that passes either field fails before dispatch. `write:"diff"` presents and adopts the ActionResult's existing observation without another capture. Agent `Locator.waitFor()` presents a fresh full state after the condition succeeds by default; use `write:"none"` for a pure wait. Core Locator waits never present.
+`@hanger-source/ab/agent` returns `Locator` from every `tab.playwright` semantic builder. It has the same immutable composition and read methods as Core Locator. Agent mutations accept only mechanical action options; runtime JavaScript that passes `write`, `observe`, `baseline`, or `observation` fails before dispatch. Agent and Core `Locator.waitFor()` are pure waits and never present content. Use explicit page/Locator waits and `tab.ax.write("diff" | "state")` at the next model decision boundary.
 
 ```ts
 tab.dev.mainFrame(options?)
@@ -268,9 +271,6 @@ locator.waitFor({
   state?: "attached" | "detached" | "visible" | "hidden",
   timeoutMs?,
   signal?,
-  // Locator only:
-  write?: "state" | "none",
-  observation?: WriteOptions,
 })
 locator.elementHandle(options?)
 locator.click(options?)
@@ -282,7 +282,7 @@ locator.focus(options?)
 locator.scrollIntoView(options?)
 locator.fill(value, options?)
 locator.type(text, options?)
-locator.fillAndSelectSuggestion(query, suggestionText, { expectedValue?, exact?, suggestionExact?, write?, observation?, timeoutMs?, signal? })
+locator.fillAndSelectSuggestion(query, suggestionText, { expectedValue?, exact?, suggestionExact?, timeoutMs?, signal? })
 locator.press(key, options?)
 locator.check(options?)
 locator.uncheck(options?)
@@ -306,7 +306,7 @@ Locators are immutable query objects. A builder call does not touch the browser.
 
 `fill()` and `type()` return `ActionResult<TextInputActionData>`. Its `data.field` contains `requestedText`, settled `inputValue`, `matchesRequestedText`, `popupBacked`, `signals`, and `next: "selectSuggestion" | "none"`. `matchesRequestedText` is `boolean` for replacement input and `null` for append typing. The same typed data is returned by Locator, AXRef, and ElementHandle input actions.
 
-`fillAndSelectSuggestion()` returns `{ input, selection, suggestion, committedValue }`. It resolves `suggestionText` only among actionable refs newly introduced after the fill; `suggestion` preserves the chosen observation/ref/role/name identity. Core Locator keeps explicit `observe`; Locator uses `write` and presents only the final selection result.
+`fillAndSelectSuggestion()` returns `{ input, selection, suggestion, committedValue }`. It resolves `suggestionText` only among actionable refs newly introduced after the fill; `suggestion` preserves the chosen observation/ref/role/name identity. Core Locator keeps explicit `observe`; Agent Locator performs the composed operation without presenting an observation.
 
 ## Element handles
 
@@ -374,10 +374,10 @@ shot.viewportId
 shot.width
 shot.height
 
-tab.cua.click({ x, y, viewportId, button?, clickCount?, observe?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
-tab.cua.move({ x, y, viewportId, observe?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
-tab.cua.wheel({ x, y, viewportId, deltaX?, deltaY?, observe?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
-tab.cua.drag({ from: { x, y }, to: { x, y }, viewportId, observe?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
+tab.cua.click({ x, y, viewportId, button?, clickCount?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
+tab.cua.move({ x, y, viewportId, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
+tab.cua.wheel({ x, y, viewportId, deltaX?, deltaY?, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
+tab.cua.drag({ from: { x, y }, to: { x, y }, viewportId, timeoutMs?, signal? }): Promise<ActionResult<CuaActionData>>
 ```
 
 `Artifact` is the single SDK handle returned for server-owned screenshot, large network-body, and completed-download bytes. `Screenshot` extends it with exact viewport identity. Agent code normally uses `tab.ax.write("screenshot"|"both")` when pixels must be shown to the model, and `tab.ax.get("screenshot")` when code only needs the typed screenshot object. Coordinates always use the returned screenshot's exact `viewportId`.

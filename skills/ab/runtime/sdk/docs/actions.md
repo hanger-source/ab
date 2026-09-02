@@ -31,7 +31,16 @@ Activation is an action-scoped rendering/input responsibility, not evidence that
 
 ## After the action
 
-Use `observe: "diff"` when the post-action semantic delta is useful. A Core Locator, ElementHandle, or CUA caller must pass `baseline`, which is an existing `AXState` or observation id from the same tab; an `AXRef` already owns its observation and supplies that identity automatically. Omit `observation` to inherit the baseline's exact capture shape. Supplying a different mode, surface, frame scope, depth, character budget, or URL policy is rejected before input dispatch because those two states do not form a meaningful diff. `observe: "state"` requests only the post-action state and needs no baseline. Rust never captures a hidden pre-action snapshot. The same action transaction waits for a bounded browser-owned navigation/relevant-network quiet window, then for current DOM mutations and finite animations to become quiet before capture; final URL and document identity are read after that optional observation. This is not application business readiness and does not wait for arbitrary later timers, persistent polling, or remote autocomplete work. Wait for the explicit semantic, lifecycle, or resource fact needed by the next decision. A timeout before input dispatch is retryable; a cancellation or transport loss after dispatch can return `outcome_unknown`, which must be inspected before any retry.
+Agent actions dispatch input and return action-owned facts. They do not capture or present AX state. Choose the next fact explicitly:
+
+- use `tab.playwright.waitForURL()` or `waitForLoadState()` for browser lifecycle facts;
+- use a Locator `waitFor()` or page-level `waitFor()` for a rendered element/text condition;
+- prepare a Resource before the action for popup, download, file chooser, dialog, network, or console events that can be missed;
+- use `tab.ax.write("diff")` when the next decision needs the semantic change since the last presented state, or `write("state")` when it needs complete current context.
+
+`write("diff")` performs a new explicit observation against the last successfully presented state and inherits that state's exact capture shape. It is not part of the preceding mutation. A different mode, surface, frame scope, depth, character budget, or URL policy does not form a meaningful diff and is rejected. A timeout before input dispatch is retryable; a cancellation or transport loss after dispatch can return `outcome_unknown`, which must be inspected before any retry.
+
+Core callers may still explicitly request `observe: "diff" | "state"`. A Core Locator, ElementHandle, or CUA caller using `observe: "diff"` must pass a same-tab `baseline`; an `AXRef` already owns its observation identity. This is a deliberate library-level action-and-observation transaction, not the Agent default. It uses bounded effect/render settlement before capture but still does not promise arbitrary timer, persistent polling, remote autocomplete, or business completion.
 
 Do not use evaluate to bypass actionability or stale identity. Do not reuse CUA coordinates after navigation, scroll, resize, or DPR change.
 
@@ -56,15 +65,9 @@ result.observation        // AXState when observe:"diff" or observe:"state" comp
 
 `ActionResult` proves which browser mechanism ran and what browser facts were observed around it. It never proves that a save, purchase, deletion, login, or other business outcome succeeded. Verify that outcome from the rendered application state or an explicitly prepared resource.
 
-Input dispatch and the optional post-action observation are separate outcomes. Once dispatch has completed, a failed AX capture does not erase the `ActionResult` or turn the mutation into an unknown dispatch. `observationOutcome.status === "failed"` retains the exact observation error; `skippedDialog` means the page is blocked by the dialog reported in the same result. The Agent facade presents this trusted status instead of inventing a diff. Keep the previous short-ref baseline, handle a reported dialog if present, then explicitly observe current state before another mutation.
+Input dispatch and optional Core post-action observation remain separate outcomes inside `ActionResult`. Once dispatch completed, a failed Core observation does not erase the action facts or turn the mutation into an unknown dispatch. In Agent mode, `observationOutcome.status` is normally `notRequested` because every AX-ref, Locator, composite form, and CUA mutation sends `observe: "none"` to Core. Agent action options reject `write`, `observe`, `baseline`, and `observation` before dispatch so old composite semantics cannot be selected accidentally.
 
-This rule is identical for AX refs, Locators, composite form actions, and CUA. When `write: "state"` or `write: "diff"` was requested but the transaction returned no observation, the Agent facade reports that exact outcome and returns the `ActionResult`; it never starts an implicit second snapshot with a new deadline. A later explicit `ax.write("state")` is a separate caller decision made after reconciling whether the mutation already happened.
-
-`observe: "diff"` is one server-side target-lane transaction with two pre-dispatch event streams. The action stream owns input completion and navigation of the acted frame. The optional observation stream owns bounded relevant XHR/Fetch and page-effect settlement, current DOM mutations and finite animations, then captures only the post-action state. File chooser interception is never armed by a normal action: create `tab.resources.fileChoosers()` before the trigger when chooser identity is required. This removes the former full-page pre-capture from the mutation's deadline without making every action wait for application work. For the resulting same-document observation, unchanged frame/document/backend-node identities keep their baseline `eN`; genuinely new nodes receive non-conflicting refs, so the model-visible diff is not inflated by positional renumbering.
-
-In `@hanger-source/ab/agent`, `tab.playwright` builders return `Locator`. Its mutations default to `write: "diff"` and reuse both the identity and exact capture shape of the last successfully presented observation. If no state has been presented yet, the first mutation requests one post-action `state` instead of inventing a baseline. The Presenter renders the compact Myers text diff and adopts the same `ActionResult.observation` object as the next per-tab short-ref baseline; it does not capture another snapshot. `{ write: "none" }` preserves the current baseline; `{ write: "state" }` requests and presents one post-action full state. Agent short-ref and Locator actions accept `write`, not Core `observe` or `baseline`; passing those Core-only fields fails before dispatch instead of being silently overridden. Core `@hanger-source/ab` continues to return ordinary Locator with explicit observation ownership and no presentation side effect.
-
-Agent `Locator.waitFor()` composes the existing Rust semantic wait with Agent presentation. After the requested attached/detached/visible/hidden fact succeeds, it presents a fresh full state by default and advances the short-ref baseline. Pass `{ write: "none" }` when code only needs synchronization. Core `Locator.waitFor()` remains a pure wait.
+Agent and Core `Locator.waitFor()` are pure waits. They prove only their requested attached/detached/visible/hidden condition and never present or advance AX state.
 
 ## AX short refs versus explicit refs
 
@@ -72,13 +75,12 @@ Agent short refs are available only after the Presenter successfully displays `w
 
 ```js
 await tab.ax.write("state");
-await tab.ax.fill("e3", "Ada", { write: "diff" });
-await tab.ax.click("e8", { write: "diff" });
+await tab.ax.fill("e3", "Ada");
+await tab.ax.click("e8");
+await tab.ax.write("diff");
 ```
 
-`write: "diff"` presents an action-produced semantic delta and moves the short-ref baseline to that returned observation. `write: "state"` requests and presents the post-action full state inside the same action transaction; it does not perform a second SDK snapshot. `write: "none"` performs no application-effect settlement, AX capture, or presentation and preserves the previous baseline; use it only when another explicit verification follows.
-
-An `interactive` baseline deliberately excludes ordinary static text, so its inherited diff cannot prove a newly rendered paragraph, total, or confirmation message. Use `write: "state"` on the consequential action, or explicitly wait for the business fact and then write full state, when that static result must be visible. AB does not silently switch capture modes after dispatch.
+Actions preserve the current short-ref baseline but do not claim it still describes the page. `write("diff")` takes and presents one new observation against that baseline, then adopts the new observation. Use it only when a delta answers the next decision; use `write("state")` for complete current context. An `interactive` baseline deliberately excludes ordinary static text, so its inherited diff cannot prove a newly rendered paragraph, total, or confirmation message. AB never silently switches capture modes.
 
 `get("state")` returns an `AXState` without presenting it. Use its bound refs directly:
 
@@ -116,9 +118,9 @@ When a single-target operation throws `strict_violation`, read the printed `erro
 
 Typed readiness and state reads are available on Locator, AXRef, and ElementHandle: `inspect({ attributes? })`, `isVisible()`, `isEnabled()`, `isChecked()`, and `inputValue()`. `inspect()` batches the element's DOM/interaction facts in one Rust/CDP read; Locator additionally has `waitFor({ state })`. Use these instead of page JavaScript when the question is an element's mechanical UI state.
 
-`fill()` and `type()` return typed `data.field`: the requested text, settled `inputValue`, `matchesRequestedText`, `popupBacked`, detection `signals`, and `next`. Rust reads the live node after dispatch. `matchesRequestedText` is an exact boolean for `fill()` and `type(..., { clear: true })`, and `null` for append typing. Agent presentation emits a trusted warning when a control truncates or normalizes replacement text; inspect `inputValue` before submitting. Popup-backed inputs receive a bounded settle window before the post-action observation is captured. When `next === "selectSuggestion"`, use the newly presented popup state and select the exact suggestion before continuing. A pre-action `aria-autocomplete: null` does not override this runtime outcome.
+`fill()` and `type()` return typed `data.field`: the requested text, settled `inputValue`, `matchesRequestedText`, `popupBacked`, detection `signals`, and `next`. Rust reads the live node after dispatch. `matchesRequestedText` is an exact boolean for `fill()` and `type(..., { clear: true })`, and `null` for append typing. Agent presentation emits a trusted warning when a control truncates or normalizes replacement text; inspect `inputValue` before submitting. When `next === "selectSuggestion"`, wait for the popup fact and explicitly observe it before choosing a suggestion. A pre-action `aria-autocomplete: null` does not override this runtime outcome.
 
-`field.fillAndSelectSuggestion(query, suggestionText, { expectedValue, exact?, suggestionExact? })` composes that protocol when the expected suggestion text is known. It captures an AX baseline, fills without presentation, finds the matching newly presented actionable ref in the next revision, clicks that exact ref, reads the field again, and fails if selection is ambiguous or the committed value does not match. This does not require the widget to expose `role="option"`; Agent mode presents only the final selection observation while the result retains the matched suggestion identity.
+`field.fillAndSelectSuggestion(query, suggestionText, { expectedValue, exact?, suggestionExact? })` composes that protocol when the expected suggestion text is known. It captures an internal AX revision boundary, fills without presentation, finds the matching newly introduced actionable ref, clicks that exact ref, reads the field again, and fails if selection is ambiguous or the committed value does not match. This does not require the widget to expose `role="option"`; Agent mode returns the selection identity and committed value without presenting AX state.
 
 ## Action choice
 

@@ -60,7 +60,8 @@ try {
   const tab = tabs[0] ?? await browser.tabs.open("https://example.com");
 
   const state = await tab.ax.write("state", { mode: "interactive" });
-  await tab.ax.click("e2", { write: "diff" });
+  await tab.ax.click("e2");
+  await tab.ax.write("diff");
   await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 } finally {
   await browser.disconnect();

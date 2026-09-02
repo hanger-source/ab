@@ -44,7 +44,8 @@ Use an exact absolute path:
 
 ```js
 const input = tab.playwright.getByLabel("Attachment", { exact: true });
-await input.setFiles("/absolute/path/report.pdf", { write: "diff" });
+await input.setFiles("/absolute/path/report.pdf");
+await tab.ax.write("diff");
 ```
 
 AB canonicalizes and validates the path. A missing path is a hard input error. Do not search broad directories, infer from a page-provided filename, or substitute another file.

@@ -7,6 +7,7 @@ use crate::actions::{
     ActionResult, ActionRunner, ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange,
     NavigationChange,
 };
+use crate::agent_browser_engine::actions::route_url_matches;
 use crate::agent_browser_engine::cdp::types::CdpEvent;
 use crate::agent_browser_engine::interaction;
 use crate::agent_browser_engine::screenshot::{capture_screenshot_base64, ScreenshotOptions};
@@ -1724,6 +1725,86 @@ impl BrowserCore {
             &dispatch_marker,
         )
         .await
+    }
+
+    /// Explicit caller-selected postcondition. It is intentionally separate
+    /// from input dispatch and AX capture. Design evidence:
+    /// `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+    pub async fn wait_for_url(
+        &self,
+        target_id: &str,
+        pattern: &str,
+        deadline: Instant,
+    ) -> AbResult<Value> {
+        if pattern.is_empty() {
+            return Err(AbError::new(
+                "invalid_argument",
+                "tab.wait_for_url.pattern",
+                "waitForURL requires a non-empty URL pattern",
+            ));
+        }
+        loop {
+            let current = self.owner.sessions().target(target_id).await?.url;
+            if route_url_matches(pattern, &current) {
+                return Ok(json!({ "url": current }));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(AbError::new(
+                    "timeout",
+                    "tab.wait_for_url.deadline",
+                    format!("URL did not match {pattern:?} before the request deadline"),
+                )
+                .with_details(json!({ "pattern": pattern, "url": current })));
+            }
+            sleep(remaining.min(Duration::from_millis(50))).await;
+        }
+    }
+
+    /// Explicit caller-selected document readiness condition; this does not
+    /// imply network idle or application/business completion. Design evidence:
+    /// `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+    pub async fn wait_for_load_state(
+        &self,
+        target_id: &str,
+        state: &str,
+        deadline: Instant,
+    ) -> AbResult<Value> {
+        if !matches!(state, "domcontentloaded" | "load") {
+            return Err(AbError::new(
+                "invalid_argument",
+                "tab.wait_for_load_state.state",
+                format!("waitForLoadState supports domcontentloaded or load; got {state}"),
+            ));
+        }
+        let sessions = self.owner.sessions();
+        let mut events = sessions.subscribe_browser_events();
+        loop {
+            let context = self.context(target_id).await?;
+            if document_ready_state(&context, deadline)
+                .await
+                .is_some_and(|ready| lifecycle_state_reached(state, &ready))
+            {
+                return Ok(json!({ "state": state }));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(AbError::new(
+                    "timeout",
+                    "tab.wait_for_load_state.deadline",
+                    format!("page did not reach {state} before the request deadline"),
+                ));
+            }
+            match timeout(remaining.min(Duration::from_millis(50)), events.recv()).await {
+                Ok(Err(broadcast::error::RecvError::Closed)) => {
+                    return Err(browser_error(
+                        "tab.wait_for_load_state.events",
+                        "CDP event stream closed",
+                    ))
+                }
+                Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) | Err(_) => {}
+            }
+        }
     }
 
     pub async fn handle_dialog(

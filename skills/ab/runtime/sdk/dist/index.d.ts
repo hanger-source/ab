@@ -9,7 +9,7 @@ export { CUA, type CuaActionData, type CuaClickOptions, type CuaDragOptions, typ
 export type { ActionCoordinateIdentity, ActionDialog, ActionOptions, ActionObservationOutcome, ActionObservationOptions, ActionResult, ActionSource, ActionTargetIdentity, ActionTiming, DocumentChange, NavigationChange, TextInputActionData, TextInputFieldOutcome, } from "./actions/result.js";
 export { Locator, type LocatorActionOptions, type LocatorClickOptions, type LocatorFilter, type LocatorQuery, type LocatorResult, type SuggestionCommitOptions, type SuggestionCommitResult, } from "./locators/index.js";
 export { AX, AXRef, AXState, type Bounds, type ClickOptions, type ObservationDiff, type ObservationGap, type ObservationRef, type ObservationSources, type ObservationSurfaceIdentity, type SnapshotOptions, type TypeOptions, } from "./ax/index.js";
-export { Browser, CDPSession, Frame, Realm, Tab, Tabs, type BrowserIdentity, type FrameInfo, type NavigateOptions, type ObserveOptions, type PageObservation, type RealmInfo, type ScreenshotOptions, type TabInfo, } from "./browser/index.js";
+export { Browser, CDPSession, Frame, Realm, Tab, Tabs, type BrowserIdentity, type FrameInfo, type LoadState, type NavigateOptions, type ObserveOptions, type PageObservation, type RealmInfo, type ScreenshotOptions, type TabInfo, } from "./browser/index.js";
 /**
  * Connects this JavaScript process to the persistent AB browser runtime.
  *

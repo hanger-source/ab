@@ -16,7 +16,7 @@ A real public SPA exposed a three-way disagreement after a semantic link click: 
 
 - Pointer preparation may retry, but the event stream used to classify effects begins at the one actual input dispatch and contains no preparation-time traffic.
 - The action transaction observes the asynchronous same-document commit without a site-specific sleep or a second input dispatch.
-- An action with `observe: "none"` returns before the server sends delayed route data; the test then waits for the explicit destination fact itself. Input completion does not claim that application work is complete.
+- An action with `observe: "none"` returns before the server sends delayed route data; the test then waits through the public `waitForURL()` operation for the explicit destination fact itself. Input completion does not claim that application work is complete.
 - `ActionResult.navigation.afterUrl`, `browser.tabs.get().url`, and the returned observation describe the same destination state.
 - Same-document navigation changes URL but not document generation.
 - The returned observation contains the destination content rather than the route-loading intermediate state.

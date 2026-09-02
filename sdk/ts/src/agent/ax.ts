@@ -11,6 +11,7 @@ import {
   type TypeOptions,
 } from "../ax/index.js";
 import type { TextInputActionData } from "../actions/result.js";
+import type { OperationOptions } from "../options.js";
 import type { DocumentationRegistry } from "./documentation.js";
 import type { Presenter } from "./presentation.js";
 
@@ -18,33 +19,34 @@ import type { Presenter } from "./presentation.js";
 export const OBSERVATION_MAX_CHARS = 24_000;
 
 export type AXContent = "state" | "screenshot" | "both";
+export type AXWriteContent = AXContent | "diff";
 
 export type WriteOptions = SnapshotOptions & {
   fullPage?: boolean;
   scale?: ScreenshotScale;
 };
 
-export type ActionWrite = "diff" | "state" | "none";
+type AXCaptureShape = Omit<SnapshotOptions, "diffFrom" | "timeoutMs" | "signal">;
 
-type OwnedActionOptions<T> = Omit<T, "observe" | "baseline">;
+type AgentActionOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
 
-export type RefActionOptions = OwnedActionOptions<CoreRefActionOptions> & {
-  write?: ActionWrite;
-};
+export type RefActionOptions = AgentActionOptions<CoreRefActionOptions>;
+export type ClickActionOptions = AgentActionOptions<ClickOptions>;
+export type TypeActionOptions = AgentActionOptions<TypeOptions>;
 
-export type ClickActionOptions = OwnedActionOptions<ClickOptions> & {
-  write?: ActionWrite;
-};
-
-export type TypeActionOptions = OwnedActionOptions<TypeOptions> & {
-  write?: ActionWrite;
-};
-
+/**
+ * Agent-facing AX observation and short-ref actions.
+ *
+ * Actions deliberately do not capture or present post-action state. The Agent
+ * chooses an explicit wait or `write()` at the next decision boundary. See
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export class AX {
   readonly #tab: CoreTab;
   readonly #presenter: Presenter;
   readonly #documentation: DocumentationRegistry;
   readonly #ownedStates = new Set<AXState>();
+  readonly #captureShapes = new WeakMap<AXState, AXCaptureShape>();
   #lastPresentedState: AXState | null = null;
 
   private constructor(
@@ -73,7 +75,8 @@ export class AX {
       this.#documentation.require("screenshot", `tab.ax.get(${JSON.stringify(content)})`);
     }
     if (content === "state") {
-      return this.#track(await this.#tab.ax.snapshot(snapshotOptions(options)));
+      const snapshot = snapshotOptions(options);
+      return this.#track(await this.#tab.ax.snapshot(snapshot), captureShape(snapshot));
     }
     if (content === "screenshot") {
       return this.#tab.screenshot({ ...options, scale: options.scale ?? "css" });
@@ -86,23 +89,26 @@ export class AX {
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    if (observation.state) this.#track(observation.state);
+    if (observation.state) {
+      this.#track(observation.state, captureShape(snapshotOptions(options)));
+    }
     return observation;
   }
 
   write(content: "state", options?: WriteOptions): Promise<AXState>;
+  write(content: "diff", options?: OperationOptions): Promise<AXState>;
   write(content: "screenshot", options?: WriteOptions): Promise<Screenshot>;
   write(
     content: "both",
     options?: WriteOptions,
   ): Promise<{ state: AXState; screenshot: Screenshot }>;
   write(
-    content: AXContent,
+    content: AXWriteContent,
     options?: WriteOptions,
   ): Promise<AXState | Screenshot | { state: AXState; screenshot: Screenshot }>;
   write(state: AXState): Promise<AXState>;
   async write(
-    content: AXContent | AXState,
+    content: AXWriteContent | AXState,
     options: WriteOptions = {},
   ): Promise<AXState | Screenshot | { state: AXState; screenshot: Screenshot }> {
     if (typeof content !== "string") {
@@ -121,6 +127,31 @@ export class AX {
       }
       await this.#replacePresentedState(content);
       return content;
+    }
+    if (content === "diff") {
+      assertDiffWriteOptions(options);
+      const baseline = this.#lastPresentedState;
+      if (!baseline || baseline.disposed) {
+        throw new ABError({
+          kind: "agent_observation_required",
+          stage: "agent.ax.write.diff",
+          message: `tab ${this.#tab.id} has no live successfully presented AX observation; call ax.write("state") before requesting a diff`,
+        });
+      }
+      const shape = this.#captureShapes.get(baseline);
+      if (!shape) {
+        throw new ABError({
+          kind: "agent_observation_shape_required",
+          stage: "agent.ax.write.diff",
+          message: `observation ${baseline.id} was presented without an Agent capture shape; call ax.write("state") before requesting a diff`,
+        });
+      }
+      return this.write("state", {
+        ...shape,
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        diffFrom: baseline,
+      });
     }
     if (content === "screenshot" || content === "both") {
       this.#documentation.require("screenshot", `tab.ax.write(${JSON.stringify(content)})`);
@@ -188,18 +219,15 @@ export class AX {
   }
 
   click(refId: string, options: ClickActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.click(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.click(actionOptions(options)));
   }
 
   doubleClick(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.doubleClick(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.doubleClick(actionOptions(options)));
   }
 
   hover(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "none", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.hover(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.hover(actionOptions(options)));
   }
 
   wheel(
@@ -208,13 +236,11 @@ export class AX {
     deltaY: number,
     options: RefActionOptions = {},
   ): Promise<ActionResult> {
-    const { write = "none", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.wheel(deltaX, deltaY, actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.wheel(deltaX, deltaY, actionOptions(options)));
   }
 
   fill(refId: string, value: string, options: RefActionOptions = {}): Promise<ActionResult<TextInputActionData>> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.fill(value, actionOptions(action, write)))
+    return this.#perform(refId, (ref) => ref.fill(value, actionOptions(options)))
       .then(async (result) => {
         await this.presentTextInputOutcome(result);
         return result;
@@ -222,8 +248,7 @@ export class AX {
   }
 
   type(refId: string, text: string, options: TypeActionOptions = {}): Promise<ActionResult<TextInputActionData>> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.type(text, actionOptions(action, write)))
+    return this.#perform(refId, (ref) => ref.type(text, actionOptions(options)))
       .then(async (result) => {
         await this.presentTextInputOutcome(result);
         return result;
@@ -231,28 +256,23 @@ export class AX {
   }
 
   press(refId: string, key: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.press(key, actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.press(key, actionOptions(options)));
   }
 
   focus(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "none", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.focus(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.focus(actionOptions(options)));
   }
 
   clear(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.clear(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.clear(actionOptions(options)));
   }
 
   check(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.check(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.check(actionOptions(options)));
   }
 
   uncheck(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.uncheck(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.uncheck(actionOptions(options)));
   }
 
   selectOption(
@@ -260,8 +280,7 @@ export class AX {
     values: string | string[],
     options: RefActionOptions = {},
   ): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.selectOption(values, actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.selectOption(values, actionOptions(options)));
   }
 
   setFiles(
@@ -269,8 +288,7 @@ export class AX {
     files: string | string[],
     options: RefActionOptions = {},
   ): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.setFiles(files, actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.setFiles(files, actionOptions(options)));
   }
 
   dragTo(
@@ -278,16 +296,14 @@ export class AX {
     targetRefId: string,
     options: RefActionOptions = {},
   ): Promise<ActionResult> {
-    const { write = "diff", ...action } = options;
-    return this.#perform(sourceRefId, write, (source) => source.dragTo(
+    return this.#perform(sourceRefId, (source) => source.dragTo(
       this.#ref(targetRefId),
-      actionOptions(action, write),
+      actionOptions(options),
     ));
   }
 
   scrollIntoView(refId: string, options: RefActionOptions = {}): Promise<ActionResult> {
-    const { write = "none", ...action } = options;
-    return this.#perform(refId, write, (ref) => ref.scrollIntoView(actionOptions(action, write)));
+    return this.#perform(refId, (ref) => ref.scrollIntoView(actionOptions(options)));
   }
 
   /** Releases every live AX observation owned by this Agent tab. The AX surface remains usable. */
@@ -307,46 +323,9 @@ export class AX {
     return this.#ownedStates.size;
   }
 
-  /** The exact observation currently visible to this Agent session. */
-  /** @internal */
-  actionBaseline(): AXState | null {
-    return this.#lastPresentedState;
-  }
-
   /** @internal */
   applyActionResult(result: ActionResult): void {
     this.#tab.applyActionResult(result);
-  }
-
-  /**
-   * Consume one action transaction without inventing a second observation.
-   * Design evidence:
-   * `docs/evidence/20260902__action-resource-ownership__@codex.md`.
-   * @internal
-   */
-  async presentActionResult(result: ActionResult, write: ActionWrite): Promise<void> {
-    this.applyActionResult(result);
-    if (write === "none") return;
-    if (result.observation) {
-      await this.write(result.observation);
-      return;
-    }
-    await this.presentActionObservationOutcome(result);
-  }
-
-  /** @internal */
-  async presentActionObservationOutcome(result: ActionResult): Promise<void> {
-    const outcome = result.observationOutcome;
-    const failure = outcome.error
-      ? ` ${outcome.error.kind} [${outcome.error.stage}]: ${outcome.error.message}`
-      : "";
-    await this.#presenter.presentText({
-      kind: "action",
-      origin: await this.#currentOrigin(),
-      observationId: null,
-      text: `AB action ${result.action} dispatch completed; post-action observation ${outcome.status}.${failure} Observe current page state before deciding on another mutation.`,
-      untrusted: false,
-    });
   }
 
   /** @internal */
@@ -390,11 +369,10 @@ export class AX {
 
   async #perform<TData = unknown>(
     refId: string,
-    write: ActionWrite,
     action: (ref: AXRef) => Promise<ActionResult<TData>>,
   ): Promise<ActionResult<TData>> {
     const result = await action(this.#ref(refId));
-    await this.presentActionResult(result, write);
+    this.applyActionResult(result);
     return result;
   }
 
@@ -441,9 +419,10 @@ export class AX {
     this.#ownedStates.delete(state);
   }
 
-  #track(state: AXState): AXState {
+  #track(state: AXState, shape?: AXCaptureShape): AXState {
     this.#pruneDisposedStates();
     this.#ownedStates.add(state);
+    if (shape) this.#captureShapes.set(state, shape);
     return state;
   }
 
@@ -468,26 +447,37 @@ function snapshotOptions(options: WriteOptions): SnapshotOptions {
   };
 }
 
-function actionOptions<T extends CoreRefActionOptions>(options: T, write: ActionWrite): T {
-  assertOwnedObservation(options);
+function captureShape(options: SnapshotOptions): AXCaptureShape {
+  return {
+    mode: options.mode ?? "full",
+    surface: options.surface ?? "active",
+    ...(options.frames === undefined ? {} : { frames: options.frames }),
+    ...(options.maxDepth === undefined ? {} : { maxDepth: options.maxDepth }),
+    ...(options.maxChars === undefined ? {} : { maxChars: options.maxChars }),
+    ...(options.includeUrls === undefined ? {} : { includeUrls: options.includeUrls }),
+  };
+}
+
+function actionOptions<T extends object>(options: T): T & { observe: "none" } {
+  assertAgentActionOptions(options);
   return {
     ...options,
-    ...(write === "diff"
-      ? { observe: "diff" as const }
-      : write === "state"
-        ? {
-            observe: "state" as const,
-            ...(options.observation === undefined
-              ? { observation: { mode: "full" as const, surface: "active" as const, maxChars: OBSERVATION_MAX_CHARS } }
-              : {}),
-          }
-        : { observe: "none" as const }),
+    observe: "none",
   };
 }
 
 /** @internal */
-export function assertOwnedObservation(options: object): void {
-  if (Object.prototype.hasOwnProperty.call(options, "observe") || Object.prototype.hasOwnProperty.call(options, "baseline")) {
-    throw new TypeError("@hanger-source/ab/agent actions own observation identity; use write instead of observe or baseline");
+export function assertAgentActionOptions(options: object): void {
+  for (const field of ["write", "observe", "baseline", "observation"] as const) {
+    if (Object.prototype.hasOwnProperty.call(options, field)) {
+      throw new TypeError(`@hanger-source/ab/agent actions do not accept ${field}; perform the action, then wait for or observe the explicit fact needed next`);
+    }
+  }
+}
+
+function assertDiffWriteOptions(options: object): void {
+  const unsupported = Object.keys(options).filter((field) => field !== "timeoutMs" && field !== "signal");
+  if (unsupported.length > 0) {
+    throw new TypeError(`ax.write("diff") inherits the presented observation capture shape and only accepts timeoutMs or signal; received ${unsupported.join(", ")}`);
   }
 }

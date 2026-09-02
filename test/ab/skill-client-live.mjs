@@ -64,15 +64,39 @@ try {
     const initialAxPresentations = presented.filter((value) => value.kind === "ax").length;
     const fillResult = await taskTab.playwright.getByLabel("Email").fill("agent@example.com");
     const afterFillPresentations = presented.filter((value) => value.kind === "ax");
-    assert.equal(afterFillPresentations.length, initialAxPresentations + 1);
-    assert.match(afterFillPresentations.at(-1).text, /Email/);
-    assert.equal(fillResult.observation.id, afterFillPresentations.at(-1).observationId);
+    assert.equal(afterFillPresentations.length, initialAxPresentations);
+    assert.deepEqual(fillResult.observationOutcome, { status: "notRequested" });
+    assert.equal(fillResult.observation, null);
+    assert.equal(initialState.disposed, false);
+    await assert.rejects(
+      taskTab.ax.write("diff", { maxChars: 8_000 }),
+      /inherits the presented observation capture shape and only accepts timeoutMs or signal/,
+    );
+    const afterFillState = await taskTab.ax.write("diff");
+    assert(afterFillState.diff);
+    assert.equal(afterFillState.sources.surface, initialState.sources.surface);
+    assert.deepEqual(
+      afterFillState.sources.surfaceIdentity,
+      initialState.sources.surfaceIdentity,
+      "explicit diff did not inherit the presented observation surface",
+    );
     assert.equal(initialState.disposed, true);
     await taskTab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
+    const pageBody = taskTab.playwright.locator("body");
+    assert.equal(
+      await pageBody.getByRole("button", { name: "Continue", exact: true }).count(),
+      1,
+    );
+    assert.equal(
+      await pageBody.getByText("Saved: agent@example.com", { exact: true }).count(),
+      1,
+    );
     const afterClickPresentations = presented.filter((value) => value.kind === "ax");
-    assert.equal(afterClickPresentations.length, initialAxPresentations + 2);
-    assert.match(afterClickPresentations.at(-1).text, /Saved: agent@example.com/);
-    assert.notEqual(afterClickPresentations.at(-1).observationId, afterFillPresentations.at(-1).observationId);
+    assert.equal(afterClickPresentations.length, initialAxPresentations + 1);
+    await taskTab.playwright.getByText("Saved: agent@example.com", { exact: true }).waitFor();
+    const afterClickState = await taskTab.ax.write("diff");
+    assert.match(afterClickState.text, /Saved: agent@example.com/);
+    assert.equal(presented.filter((value) => value.kind === "ax").length, initialAxPresentations + 2);
     assert.equal(
       await taskTab.playwright.getByText("Saved: agent@example.com", { exact: true }).textContent(),
       "Saved: agent@example.com",
@@ -82,7 +106,7 @@ try {
     const silentResult = await taskTab.playwright.getByRole("button", {
       name: "Silent action",
       exact: true,
-    }).domInvoke("click", { write: "none" });
+    }).domInvoke("click");
     assert.deepEqual(silentResult.observationOutcome, { status: "notRequested" });
     assert.equal(silentResult.observation, null);
     assert.equal(
@@ -98,7 +122,8 @@ try {
     const silentNavigationResult = await taskTab.playwright.getByRole("button", {
       name: "Silent navigate action",
       exact: true,
-    }).click({ write: "none" });
+    }).click();
+    await taskTab.playwright.waitForURL("#silent-navigation", { timeoutMs: 2_000 });
     assert.equal(silentNavigationResult.navigation.changed, true);
     assert.match(silentNavigationResult.navigation.afterUrl, /#silent-navigation$/);
     assert.match(taskTab.url, /#silent-navigation$/);
@@ -109,10 +134,14 @@ try {
       beforeSilentNavigationPresentations,
     );
 
+    const beforeNavigatePresentations = presented.filter((value) => value.kind === "ax").length;
     await taskTab.playwright.getByRole("button", {
       name: "Navigate action",
       exact: true,
     }).click();
+    await taskTab.playwright.waitForURL("#after-action", { timeoutMs: 2_000 });
+    assert.equal(presented.filter((value) => value.kind === "ax").length, beforeNavigatePresentations);
+    await taskTab.ax.write("diff");
     const navigationPresentation = presented.filter((value) => value.kind === "ax").at(-1);
     assert(navigationPresentation);
     assert.match(navigationPresentation.origin, /#after-action$/);
@@ -144,8 +173,16 @@ try {
       timeoutMs: 2_000,
     });
     const afterWaitPresentations = presented.filter((value) => value.kind === "ax");
-    assert.equal(afterWaitPresentations.length, beforeWaitPresentations + 1);
-    assert.match(afterWaitPresentations.at(-1).text, /Delayed semantic option/);
+    assert.equal(afterWaitPresentations.length, beforeWaitPresentations);
+    const afterWaitState = await taskTab.ax.write("state");
+    assert.match(afterWaitState.text, /Delayed semantic option/);
+
+    await taskTab.playwright.waitForLoadState("domcontentloaded", { timeoutMs: 2_000 });
+
+    await assert.rejects(
+      taskTab.playwright.getByRole("button", { name: "Silent action", exact: true }).click({ write: "diff" }),
+      /actions do not accept write/,
+    );
 
     const presentedBeforeGets = await taskTab.ax.write("state", { mode: "interactive" });
     const silentRef = presentedBeforeGets.refs().find((ref) => ref.name === "Silent action");
@@ -153,7 +190,7 @@ try {
     const retainedOne = await taskTab.ax.get("state", { mode: "interactive" });
     const retainedTwo = await taskTab.ax.get("state", { mode: "interactive" });
     assert(taskTab.ax.liveObservations >= 3);
-    await taskTab.ax.click(silentRef.id, { write: "none" });
+    await taskTab.ax.click(silentRef.id);
 
     const rejectedState = await taskTab.ax.get("state", { mode: "interactive" });
     rejectNextAxPresentation = true;
@@ -163,7 +200,7 @@ try {
     );
     assert.equal(rejectedState.disposed, true);
     assert.equal(presentedBeforeGets.disposed, false);
-    await taskTab.ax.click(silentRef.id, { write: "none" });
+    await taskTab.ax.click(silentRef.id);
 
     await taskTab.ax.dispose();
     assert.equal(taskTab.ax.liveObservations, 0);
@@ -198,9 +235,10 @@ try {
       daemonId: browser.identity.daemonId,
       documentTitle,
       result: "Saved: agent@example.com",
-      agentLocatorPresentations: afterClickPresentations.length - initialAxPresentations,
+      agentActionPresentations: 0,
+      explicitObservationPresentations: 3,
       silentActionObservation: silentResult.observationOutcome.status,
-      agentLocatorWaitPresentation: "Delayed semantic option",
+      agentLocatorWaitPresentation: "none",
       documentationGate: "evaluate",
       screenshotMetadata: "top-level-and-artifact-aligned",
       tabSurface: Object.getOwnPropertyNames(taskTab).sort(),

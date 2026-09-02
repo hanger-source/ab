@@ -1,5 +1,5 @@
 import type { Screenshot } from "../artifacts/index.js";
-import type { Tab as CoreTab } from "../browser/index.js";
+import type { LoadState, Tab as CoreTab } from "../browser/index.js";
 import type {
   ElementHandle,
   ElementInspection,
@@ -19,37 +19,23 @@ import type { TextInputActionData } from "../actions/result.js";
 import type { OperationOptions } from "../options.js";
 import {
   AX,
-  OBSERVATION_MAX_CHARS,
-  assertOwnedObservation,
-  type ActionWrite,
-  type WriteOptions,
+  assertAgentActionOptions,
 } from "./ax.js";
 
-type OwnedActionOptions<T> = Omit<T, "observe" | "baseline">;
+type AgentActionOptions<T> = Omit<T, "observe" | "baseline" | "observation">;
 
-export type LocatorActionOptions = OwnedActionOptions<CoreLocatorActionOptions> & {
-  write?: ActionWrite;
-};
+export type LocatorActionOptions = AgentActionOptions<CoreLocatorActionOptions>;
 
-export type LocatorClickOptions = OwnedActionOptions<CoreLocatorClickOptions> & {
-  write?: ActionWrite;
-};
+export type LocatorClickOptions = AgentActionOptions<CoreLocatorClickOptions>;
 
 export type LocatorTypeOptions = LocatorActionOptions & {
   clear?: boolean;
   delayMs?: number;
 };
 
-export type SuggestionCommitOptions = OwnedActionOptions<CoreSuggestionCommitOptions> & {
-  write?: ActionWrite;
-};
+export type SuggestionCommitOptions = AgentActionOptions<CoreSuggestionCommitOptions>;
 
-export type LocatorWaitOptions = CoreLocatorWaitOptions & {
-  /** Present a fresh full state after the semantic wait succeeds. */
-  write?: "state" | "none";
-  /** Shape and deadline for the post-wait state capture. */
-  observation?: WriteOptions;
-};
+export type LocatorWaitOptions = CoreLocatorWaitOptions;
 
 export type LocatorFilter = Omit<CoreLocatorFilter, "has"> & {
   has?: Locator;
@@ -112,12 +98,29 @@ export class Playwright {
     return this.#core.waitFor(options);
   }
 
+  /** Waits for one explicit URL postcondition without presenting page state. */
+  waitForURL(url: string, options: OperationOptions = {}): Promise<void> {
+    return this.#core.waitForURL(url, options);
+  }
+
+  /**
+   * Waits for readiness of the current document without anticipating a future navigation
+   * or implying application/business completion.
+   */
+  waitForLoadState(state: LoadState = "load", options: OperationOptions = {}): Promise<void> {
+    return this.#core.waitForLoadState(state, options);
+  }
+
   #wrap(locator: CoreLocator): Locator {
     return Locator.create(locator, this.#ax);
   }
 }
 
-/** Immutable semantic Locator with Agent-owned action presentation. */
+/**
+ * Immutable semantic Locator with explicit post-action waits and observations.
+ * Design evidence:
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export class Locator {
   readonly #core: CoreLocator;
   readonly #ax: AX;
@@ -148,6 +151,34 @@ export class Locator {
     return this.#wrap(this.#core.locator(
       typeof selector === "string" ? selector : selector.#core,
     ));
+  }
+
+  getByRole(role: string, options: { name?: string; exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByRole(role, options));
+  }
+
+  getByText(text: string, options: { exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByText(text, options));
+  }
+
+  getByLabel(label: string, options: { exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByLabel(label, options));
+  }
+
+  getByPlaceholder(placeholder: string, options: { exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByPlaceholder(placeholder, options));
+  }
+
+  getByAltText(text: string, options: { exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByAltText(text, options));
+  }
+
+  getByTitle(title: string, options: { exact?: boolean } = {}): Locator {
+    return this.#wrap(this.#core.getByTitle(title, options));
+  }
+
+  getByTestId(testId: string): Locator {
+    return this.#wrap(this.#core.getByTestId(testId));
   }
 
   and(other: Locator): Locator {
@@ -183,9 +214,7 @@ export class Locator {
   }
 
   async waitFor(options: LocatorWaitOptions = {}): Promise<void> {
-    const { write = "state", observation = {}, ...waitOptions } = options;
-    await this.#core.waitFor(waitOptions);
-    if (write === "state") await this.#ax.write("state", observation);
+    await this.#core.waitFor(options);
   }
 
   elementHandle(options: OperationOptions = {}): Promise<ElementHandle> {
@@ -193,38 +222,38 @@ export class Locator {
   }
 
   click(options: LocatorClickOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.click(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.click(coreOptions));
   }
 
   doubleClick(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.doubleClick(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.doubleClick(coreOptions));
   }
 
   hover(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "none", (coreOptions) => this.#core.hover(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.hover(coreOptions));
   }
 
   wheel(deltaX: number, deltaY: number, options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "none", (coreOptions) => this.#core.wheel(deltaX, deltaY, coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.wheel(deltaX, deltaY, coreOptions));
   }
 
   focus(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "none", (coreOptions) => this.#core.focus(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.focus(coreOptions));
   }
 
   scrollIntoView(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "none", (coreOptions) => this.#core.scrollIntoView(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.scrollIntoView(coreOptions));
   }
 
   async fill(value: string, options: LocatorActionOptions = {}): Promise<LocatorResult<TextInputActionData>> {
-    const result = await this.#perform(options, "diff", (coreOptions) => this.#core.fill(value, coreOptions));
+    const result = await this.#perform(options, (coreOptions) => this.#core.fill(value, coreOptions));
     await this.#ax.presentTextInputOutcome(result);
     return result;
   }
 
   async type(text: string, options: LocatorTypeOptions = {}): Promise<LocatorResult<TextInputActionData>> {
     const { clear, delayMs, ...actionOptions } = options;
-    const result = await this.#perform(actionOptions, "diff", (coreOptions) => this.#core.type(text, {
+    const result = await this.#perform(actionOptions, (coreOptions) => this.#core.type(text, {
       ...coreOptions,
       ...(clear === undefined ? {} : { clear }),
       ...(delayMs === undefined ? {} : { delayMs }),
@@ -238,46 +267,41 @@ export class Locator {
     suggestionText: string,
     options: SuggestionCommitOptions = {},
   ): Promise<SuggestionCommitResult> {
-    assertOwnedObservation(options);
-    const { write = "diff", ...coreOptions } = options;
-    const observe = write === "diff" ? "diff" : write === "state" ? "state" : "none";
+    assertAgentActionOptions(options);
     const result = await this.#core.fillAndSelectSuggestion(query, suggestionText, {
-      ...coreOptions,
-      observe,
-      ...(observe === "state" && coreOptions.observation === undefined
-        ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
-        : {}),
+      ...options,
+      observe: "none",
     });
-    await this.#ax.presentActionResult(result.selection, write);
+    this.#ax.applyActionResult(result.selection);
     return result;
   }
 
   press(key: string, options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.press(key, coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.press(key, coreOptions));
   }
 
   check(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.check(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.check(coreOptions));
   }
 
   uncheck(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.uncheck(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.uncheck(coreOptions));
   }
 
   clear(options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.clear(coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.clear(coreOptions));
   }
 
   selectOption(values: string | string[], options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.selectOption(values, coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.selectOption(values, coreOptions));
   }
 
   setFiles(files: string | string[], options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.setFiles(files, coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.setFiles(files, coreOptions));
   }
 
   dragTo(target: Locator, options: LocatorActionOptions = {}): Promise<LocatorResult> {
-    return this.#perform(options, "diff", (coreOptions) => this.#core.dragTo(target.#core, coreOptions));
+    return this.#perform(options, (coreOptions) => this.#core.dragTo(target.#core, coreOptions));
   }
 
   textContent(options: OperationOptions = {}): Promise<string> {
@@ -304,7 +328,7 @@ export class Locator {
   ): Promise<LocatorResult<{ value?: T }>> {
     const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
     const actionOptions = Array.isArray(argsOrOptions) ? options : argsOrOptions;
-    return this.#perform(actionOptions, "diff", (coreOptions) => this.#core.domInvoke<T>(method, args, coreOptions));
+    return this.#perform(actionOptions, (coreOptions) => this.#core.domInvoke<T>(method, args, coreOptions));
   }
 
   screenshot(options: OperationOptions = {}): Promise<Screenshot> {
@@ -345,26 +369,14 @@ export class Locator {
 
   async #perform<TData>(
     options: LocatorActionOptions,
-    defaultWrite: ActionWrite,
     action: (options: CoreLocatorActionOptions) => Promise<LocatorResult<TData>>,
   ): Promise<LocatorResult<TData>> {
-    assertOwnedObservation(options);
-    const { write = defaultWrite, ...coreOptions } = options;
-    const baseline = this.#ax.actionBaseline();
-    const observe = write === "diff"
-      ? baseline ? "diff" : "state"
-      : write === "state"
-        ? "state"
-        : "none";
+    assertAgentActionOptions(options);
     const result = await action({
-      ...coreOptions,
-      observe,
-      ...(observe === "diff" ? { baseline: baseline! } : {}),
-      ...(observe === "state" && coreOptions.observation === undefined
-        ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
-        : {}),
+      ...options,
+      observe: "none",
     });
-    await this.#ax.presentActionResult(result, write);
+    this.#ax.applyActionResult(result);
     return result;
   }
 }

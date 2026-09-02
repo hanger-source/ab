@@ -4,7 +4,7 @@ description: "Control AB's persistent headed Chrome through the version-matched 
 license: Apache-2.0
 metadata:
   author: hanger
-  version: "0.3.0-alpha.2"
+  version: "0.3.0-alpha.3"
   repository: https://github.com/hanger-source/ab
   compatibility: macOS arm64, Node.js 20 or later, and Google Chrome
 ---
@@ -81,10 +81,11 @@ Do not silently turn a failed ref or Locator action into JavaScript or coordinat
 ```ts
 const state = await tab.ax.write("state", { maxChars: 24_000 });
 await tab.ax.fill("e8", "agent@example.com");
-await tab.ax.click("e12", { write: "diff" });
+await tab.ax.click("e12");
+await tab.ax.write("diff");
 ```
 
-`write("state")` displays bounded untrusted page content, establishes the last presented observation for this Agent session and tab, and returns that exact `AXState`. `state.id`, the Presenter observation id, and the baseline used by the next short-ref action are the same identity; do not call `get()` after `write()` to obtain it. Short refs are only a convenience: every action sends the exact observation id and ref id to Rust. After navigation or meaningful rerender, write a new state or diff. Never guess old refs.
+`write("state")` displays bounded untrusted page content, establishes the last presented observation for this Agent session and tab, and returns that exact `AXState`. `state.id`, the Presenter observation id, and the baseline used by the next short-ref action are the same identity; do not call `get()` after `write()` to obtain it. Short refs are only a convenience: every action sends the exact observation id and ref id to Rust. Actions do not capture or display a post-action state. At the next decision boundary, choose the cheapest explicit fact: a URL/load/element/resource wait, `write("diff")`, or a complete `write("state")`. Never guess old refs.
 
 Use `get()` when code needs the typed object without showing it or changing the presented baseline:
 
@@ -110,14 +111,14 @@ await tab.playwright.getByLabel("Email").fill("agent@example.com");
 await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 await tab.playwright.locator("article.result").nth(0).click();
 const card = tab.playwright.locator("article.result").filter({ hasText: "Ready", visible: true });
-await card.locator(tab.playwright.getByRole("button", { name: "Open" })).click();
+await card.getByRole("button", { name: "Open" }).click();
 ```
 
-Prefer role, label, text, placeholder, alt text, title, or test id over CSS. Use CSS when the page exposes no stable semantic identity. Locator actions are strict; `count()` and `all()` are the multi-match operations.
+Prefer role, label, text, placeholder, alt text, title, or test id over CSS. Use CSS when the page exposes no stable semantic identity. The same semantic builders are available on a Locator to scope descendants naturally. Locator actions are strict; `count()` and `all()` are the multi-match operations. A strict error displays a bounded candidate list; narrow by scope or stronger identity instead of silently choosing `first()` unless order is the intended identity.
 
 Locator text and accessible-name arguments are literal strings in the current public API. Do not pass JavaScript `RegExp` objects or Playwright-style regex name filters; use an observed exact string, a literal substring with `exact: false`, or compose/filter Locators.
 
-In `@hanger-source/ab/agent`, these builders return `Locator`. Mutations default to `write: "diff"`: Rust dispatches the input once and records action-owned navigation, dialog, and file-chooser facts. Because a post-action observation was requested, a separately armed effect stream also waits within fixed bounds for relevant application requests and page signals, settles current DOM mutations and finite animations, then captures the observation. The Presenter displays that exact observation and adopts it as the short-ref baseline. This bounded observation settle does not promise that arbitrary later timers, persistent polling, autocomplete services, or the application's business state have completed. Wait for the semantic, lifecycle, or resource fact needed by the next decision. `write: "none"` deliberately skips application-effect settlement and AX capture; use an explicit wait, resource, or observation for the next fact. `Locator.waitFor()` presents a fresh full state by default after its condition succeeds; pass `{ write: "none" }` for synchronization only. Core `@hanger-source/ab` Locators keep explicit `observe` and pure wait semantics and never present content.
+In `@hanger-source/ab/agent`, these builders return `Locator`. Mutations dispatch once and return action-owned target, mechanism, navigation, document, dialog, timing, and settled input facts; they do not capture or present AX state. Agent action options do not accept `write`, `observe`, `baseline`, or `observation`. `Locator.waitFor()` is also a pure wait. Use `tab.playwright.waitForURL()`, `waitForLoadState()`, page/Locator `waitFor()`, or a pre-armed Resource for the specific postcondition, then call `tab.ax.write("diff" | "state")` only when the next decision needs model-visible page state. Core `@hanger-source/ab` retains explicit `observe` transactions for programmatic callers and never presents content.
 
 Use `locator.elementHandle()` or `ref.elementHandle()` only when several operations must stay bound to the same actual node. Element handles do not rerun a Locator after navigation and must be disposed.
 
@@ -126,8 +127,8 @@ For forms with autocomplete, datepickers, token choosers, or popup menus, combin
 - before the first mutation, create Locators from identities actually shown by AX. A displayed `textbox "From:"` supports `getByRole("textbox", { name: "From:", exact: true })`; it does not prove that `From:` came from an HTML label. Use `getByLabel()` only for a known label/control relation and `getByPlaceholder()` only when placeholder is known;
 - call one typed `inspect({ attributes: [...] })` per control for readonly, input type, and other stable mechanics; a null autocomplete attribute is not proof that runtime code will not create suggestions;
 - keep stable fields and submit controls as Locators so each operation resolves the current node;
-- after `fill()` or `type()`, read `result.data.field`: `popupBacked: true` plus `next: "selectSuggestion"` is the runtime instruction to use the newly presented suggestions, not to continue or press Enter blindly;
-- when the expected suggestion text is known, especially inside a page countdown, prefer `field.fillAndSelectSuggestion(query, suggestionText, { expectedValue })`; it owns fill → AX revision capture → newly presented ref selection → committed-value verification and presents only the final selection state, including for widgets that omit option roles;
+- after `fill()` or `type()`, read `result.data.field`: `popupBacked: true` plus `next: "selectSuggestion"` means wait for and explicitly observe suggestions, not continue or press Enter blindly;
+- when the expected suggestion text is known, especially inside a page countdown, prefer `field.fillAndSelectSuggestion(query, suggestionText, { expectedValue })`; it owns fill → AX revision capture → exact new ref selection → committed-value verification, without presenting intermediate or final AX state, including for widgets that omit option roles;
 - use a fresh full AX state for the popup's changing options and select the exact displayed business value;
 - after every popup selection, discard its refs, verify the committed field with `inputValue()`, and write a new state before using another ref;
 - readonly controls are widget triggers: click and operate their popup. `element_not_editable` is not a reason to try another string or bypass the widget with `evaluate()`.
@@ -146,12 +147,12 @@ If an explicit START control begins a short countdown, finish preparation before
 
 During that countdown, keep the already-determined operations in one managed JavaScript cell. If the Tool yields a running cell id, wait on that exact cell with the shortest practical yield instead of submitting another expression.
 
-When the next several operations are already determined by stable Locators and committed values can be checked mechanically, execute them in one cell with `write: "none"`, then request one bounded observation. Do not spend page time returning to the model merely to narrate an already-decided next action. Stop the expression at the first step whose choice genuinely depends on newly rendered state.
+When the next several operations are already determined by stable Locators and committed values can be checked mechanically, execute them in one cell, then request one bounded observation. Do not spend page time returning to the model merely to narrate an already-decided next action. Stop the expression at the first step whose choice genuinely depends on newly rendered state.
 
-For a page countdown of roughly one minute or less, do not make the timed action own two AX captures. Dispatch with a short explicit deadline and no post-action write, then request one bounded fresh state:
+For a page countdown of roughly one minute or less, dispatch with a short explicit deadline, then request one bounded fresh state only when the next decision needs it:
 
 ```ts
-await start.click({ write: "none", timeoutMs: 2_000 });
+await start.click({ timeoutMs: 2_000 });
 await tab.ax.write("state", { timeoutMs: 2_000, maxChars: 24_000 });
 ```
 
@@ -180,9 +181,8 @@ const result = await tab.cua.click({
   x: 320,
   y: 180,
   viewportId: shot.viewportId,
-  observe: "diff",
 });
-result.observation?.text;
+await tab.ax.write("diff");
 ```
 
 Never reuse coordinates with a different `viewportId`. Take a new screenshot after navigation, scrolling, resizing, or layout changes.

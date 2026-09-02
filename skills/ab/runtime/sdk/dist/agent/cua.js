@@ -1,6 +1,10 @@
 import { CUA as CoreCUA, } from "../actions/cua.js";
-import { AX, OBSERVATION_MAX_CHARS } from "./ax.js";
-/** Viewport input bound to the Agent's presented AX baseline. */
+import { AX, assertAgentActionOptions } from "./ax.js";
+/**
+ * Viewport input whose coordinates must come from the currently visible
+ * viewport. CUA dispatch is separate from any later observation. See
+ * `docs/evidence/20260902__action-wait-observation-ownership-audit__@codex.md`.
+ */
 export class CUA {
     #core;
     #ax;
@@ -25,18 +29,12 @@ export class CUA {
         return this.#perform(options, (action) => this.#core.drag(action));
     }
     async #perform(options, action) {
-        const baseline = options.baseline ?? this.#ax.actionBaseline();
-        const requested = options.observe ?? "none";
-        const observe = requested === "diff" && !baseline ? "state" : requested;
+        assertAgentActionOptions(options);
         const result = await action({
             ...options,
-            observe,
-            ...(observe === "diff" ? { baseline: baseline } : {}),
-            ...(observe === "state" && options.observation === undefined
-                ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } }
-                : {}),
+            observe: "none",
         });
-        await this.#ax.presentActionResult(result, observe === "none" ? "none" : observe);
+        this.#ax.applyActionResult(result);
         return result;
     }
 }

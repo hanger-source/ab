@@ -32,9 +32,10 @@ Use Locators for these stable controls even in a one-off task. Reserve short AX 
 `fill()` replaces the current value and is the normal choice for inputs and textareas. `type()` emits keyboard input and is appropriate when the page depends on per-key behavior. `clear()` is explicit when empty state itself matters.
 
 ```js
-await tab.playwright.getByLabel("Email", { exact: true }).fill("agent@example.com", { write: "diff" });
+await tab.playwright.getByLabel("Email", { exact: true }).fill("agent@example.com");
 await tab.playwright.getByLabel("Search").type("quarterly report", { delayMs: 25 });
-await tab.playwright.getByRole("button", { name: "Save", exact: true }).click({ write: "diff" });
+await tab.playwright.getByRole("button", { name: "Save", exact: true }).click();
+await tab.playwright.waitFor({ text: "Saved", state: "visible" });
 ```
 
 Do not log or echo secret values after entry. If a framework rerenders the field, resolve the Locator again or take a fresh AX state; do not keep an old element handle by default.
@@ -44,8 +45,8 @@ Do not log or echo secret values after entry. If a framework rerenders the field
 Use `check()` / `uncheck()` for checkbox state and `selectOption()` for native select values:
 
 ```js
-await tab.playwright.getByLabel("Send a copy").check({ write: "diff" });
-await tab.playwright.getByLabel("Region").selectOption("ap-southeast-1", { write: "diff" });
+await tab.playwright.getByLabel("Send a copy").check();
+await tab.playwright.getByLabel("Region").selectOption("ap-southeast-1");
 ```
 
 Custom comboboxes are interactive widgets, not native selects. Observe their roles and use click/type/press against the controls the page actually exposes.
@@ -57,8 +58,8 @@ Before toggling, inspect current state when duplicate mutation matters. A blind 
 Autocomplete entry is a commit protocol, not a text assignment:
 
 1. Use the stable field Locator to type the query.
-2. Wait for a semantic option to appear; the Agent Locator presents a fresh full AX state when that wait succeeds.
-3. Select the exact displayed business value from that observation.
+2. Wait for a semantic option to appear, then explicitly write a fresh AX state when model choice is needed.
+3. Select the exact displayed business value from that state.
 4. Discard all refs from the suggestion observation.
 5. Read `inputValue()` from the stable Locator and verify the committed value.
 
@@ -72,11 +73,11 @@ const committed = await destination.fillAndSelectSuggestion(
 const committedDestination = committed.committedValue;
 ```
 
-`data.field` is the input action's runtime outcome. It detects semantic combobox/datalist signals and common widget-owned signals such as jQuery UI, reads the settled input value, and reports whether replacement input retained the requested text exactly. A false `matchesRequestedText` means maxlength, normalization, or application behavior changed the value; inspect `inputValue` and do not submit under the original assumption. The result also lets the post-action observation include a generated popup. Do not treat a pre-action null attribute as stronger evidence. Do not continue to the next popup-backed control until the committed value is visible. Text remaining in the input does not prove the page accepted a suggestion.
+`data.field` is the input action's runtime outcome. It detects semantic combobox/datalist signals and common widget-owned signals such as jQuery UI, reads the settled input value, and reports whether replacement input retained the requested text exactly. A false `matchesRequestedText` means maxlength, normalization, or application behavior changed the value; inspect `inputValue` and do not submit under the original assumption. Do not treat a pre-action null attribute as stronger evidence. Do not continue to the next popup-backed control until the committed value is visible. Text remaining in the input does not prove the page accepted a suggestion.
 
 Use `fillAndSelectSuggestion()` when the expected displayed suggestion can be named before the popup appears, such as a city, code, product, or person substring. It selects only a matching ref newly introduced after the fill, so identical text already present in the instruction is excluded. Keep the lower-level five-step protocol when the correct option cannot be known until the popup is observed. Ambiguous new matches fail instead of silently choosing the first.
 
-An action-produced diff is captured immediately after input dispatch. It may contain a suggestion that appeared synchronously, but it does not promise that delayed autocomplete, timer, request, or SPA work has completed. Do not insert a blind sleep and do not assume the fill diff owns the popup; use the composed AX-revision operation or wait for another explicit page fact.
+An input action does not own popup observation. Do not insert a blind sleep or assume that dispatch means a delayed autocomplete, timer, request, or SPA has completed; use the composed AX-revision operation or wait for the explicit page fact, then observe if the next choice needs model-visible state.
 
 ## Readonly and popup-backed dates
 
@@ -86,8 +87,9 @@ A readonly text input is normally the trigger for a datepicker or another owned 
 const date = tab.playwright.getByRole("textbox").nth(2);
 if ((await date.inspect()).readOnly) {
   await date.click();
+  await tab.ax.write("state");
   // Navigate month/year controls when necessary, then click the exact day
-  // using a ref from the Locator click's presented popup observation.
+  // using a ref from the explicitly presented popup observation.
   await tab.ax.click("<fresh-day-ref>");
   const committedDate = await date.inputValue();
 }
@@ -106,7 +108,8 @@ Do not silently bypass disabled controls, overlay interception, or validation wi
 Prefer `setFiles()` on an addressable file input:
 
 ```js
-await tab.playwright.getByLabel("Attachment").setFiles("/absolute/path/report.pdf", { write: "diff" });
+await tab.playwright.getByLabel("Attachment").setFiles("/absolute/path/report.pdf");
+await tab.ax.write("diff");
 ```
 
 Verify the exact absolute path before the call. For a chooser-driven control, open `watchFileChoosers()` before clicking and use the emitted frame/backend-node identity. Do not replace a missing file with a similarly named path.
