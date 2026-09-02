@@ -984,8 +984,9 @@ impl SessionManager {
         // Runtime.runIfWaitingForDebugger. Awaiting Runtime.evaluate in a
         // paused child session deadlocks its parent's load. See
         // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
-        // Executable OOPIF coverage:
-        // `test/ab/scenarios/oopif-session-registry/README.md`.
+        // Executable paused-session coverage:
+        // `test/ab/scenarios/oopif-session-registry/README.md` and
+        // `test/ab/scenarios/background-tab-popup-action/README.md`.
         let pointer_registration =
             pointer_action::begin_register_for_session(&self.client, &record.session_id)
                 .await

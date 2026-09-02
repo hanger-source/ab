@@ -217,6 +217,22 @@ export class AX {
     applyActionResult(result) {
         this.#tab.applyActionResult(result);
     }
+    /**
+     * Consume one action transaction without inventing a second observation.
+     * Design evidence:
+     * `docs/evidence/20260902__action-resource-ownership__@codex.md`.
+     * @internal
+     */
+    async presentActionResult(result, write) {
+        this.applyActionResult(result);
+        if (write === "none")
+            return;
+        if (result.observation) {
+            await this.write(result.observation);
+            return;
+        }
+        await this.presentActionObservationOutcome(result);
+    }
     /** @internal */
     async presentActionObservationOutcome(result) {
         const outcome = result.observationOutcome;
@@ -271,24 +287,7 @@ export class AX {
     }
     async #perform(refId, write, action) {
         const result = await action(this.#ref(refId));
-        this.applyActionResult(result);
-        if (write === "diff") {
-            if (result.observation) {
-                await this.#presentState(result.observation);
-                await this.#replacePresentedState(result.observation);
-            }
-            else {
-                await this.presentActionObservationOutcome(result);
-            }
-        }
-        else if (write === "state") {
-            if (result.observation) {
-                await this.write(result.observation);
-            }
-            else {
-                await this.write("state");
-            }
-        }
+        await this.presentActionResult(result, write);
         return result;
     }
     async #presentState(state) {

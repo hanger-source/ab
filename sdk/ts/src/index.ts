@@ -64,7 +64,6 @@ export {
 export type {
   ActionCoordinateIdentity,
   ActionDialog,
-  ActionFileChooser,
   ActionOptions,
   ActionObservationOutcome,
   ActionObservationOptions,

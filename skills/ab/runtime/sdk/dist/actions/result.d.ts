@@ -47,14 +47,6 @@ export type ActionDialog = {
         hasBrowserHandler: boolean;
     };
 };
-export type ActionFileChooser = {
-    opened: boolean;
-    complete: boolean;
-    sessionId?: string;
-    frameId?: string;
-    backendNodeId?: number;
-    mode?: string;
-};
 export type ActionObservationOutcome = {
     status: "notRequested" | "completed" | "skippedDialog" | "failed";
     error?: {
@@ -87,7 +79,6 @@ export type ActionResult<TData = unknown> = {
     navigation: NavigationChange;
     document: DocumentChange;
     dialog: ActionDialog;
-    fileChooser: ActionFileChooser;
     pendingRelease: boolean;
     observationOutcome: ActionObservationOutcome;
     lastStage: string;

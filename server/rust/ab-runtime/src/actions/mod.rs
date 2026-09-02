@@ -14,8 +14,7 @@ mod model;
 
 pub use model::{
     dispatch_mechanism, ActionCoordinateIdentity, ActionObservationOutcome, ActionResult,
-    ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange, FileChooserOutcome,
-    NavigationChange,
+    ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange, NavigationChange,
 };
 
 #[derive(Clone, Default)]
@@ -71,7 +70,14 @@ impl ActionRunner {
         arguments: &Value,
         before_dispatch: Option<&(dyn Fn() + Send + Sync)>,
     ) -> AbResult<Value> {
+        let diagnostic_started = std::time::Instant::now();
         Self::assert_live(context, target).await?;
+        if std::env::var_os("AGENT_BROWSER_DEBUG").is_some() {
+            eprintln!(
+                "[ab.action] action={operation} stage=target_live elapsed_ms={}",
+                diagnostic_started.elapsed().as_millis()
+            );
+        }
         let mut action_sessions = context.iframe_sessions.clone();
         action_sessions.insert(target.frame_id.clone(), target.session_id.clone());
         let ref_id = "e1";

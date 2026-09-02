@@ -57,6 +57,11 @@ const cases: LiveCase[] = [
     default: true,
   },
   {
+    name: "scenario-background-tab-popup-action",
+    file: "scenarios/background-tab-popup-action/live.ts",
+    default: true,
+  },
+  {
     name: "scenario-pointer-click-sequence",
     file: "scenarios/pointer-click-sequence/live.ts",
     default: true,

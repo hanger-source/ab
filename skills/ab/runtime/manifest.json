@@ -1,7 +1,7 @@
 {
   "format": 1,
   "protocolVersion": 3,
-  "buildId": "ab-runtime@0.3.0-alpha.2+4a3d34554815f819",
+  "buildId": "ab-runtime@0.3.0-alpha.2+f853130ced277e95",
   "sdk": {
     "name": "@hanger-source/ab",
     "version": "0.3.0-alpha.2"

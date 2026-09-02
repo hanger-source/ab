@@ -1189,6 +1189,10 @@ async fn dispatch_mouse_or_dialog(
 
     // Subscribe before sending so the dialog event cannot slip past us.
     let mut events = client.subscribe();
+    let diagnostic_started = std::time::Instant::now();
+    if std::env::var_os("AGENT_BROWSER_DEBUG").is_some() {
+        eprintln!("[ab.action] input={} stage=send_started", params.event_type);
+    }
     let send =
         client.send_command_typed::<_, Value>("Input.dispatchMouseEvent", params, Some(session_id));
     tokio::pin!(send);
@@ -1196,6 +1200,13 @@ async fn dispatch_mouse_or_dialog(
         tokio::select! {
             res = &mut send => {
                 res?;
+                if std::env::var_os("AGENT_BROWSER_DEBUG").is_some() {
+                    eprintln!(
+                        "[ab.action] input={} stage=acknowledged elapsed_ms={}",
+                        params.event_type,
+                        diagnostic_started.elapsed().as_millis()
+                    );
+                }
                 return Ok(None);
             }
             event = events.recv() => {

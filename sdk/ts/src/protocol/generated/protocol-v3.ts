@@ -1,7 +1,7 @@
 // Generated from server/rust/ab-protocol. Do not edit.
 export const PROTOCOL_VERSION = 3 as const;
 export const SDK_VERSION = "0.3.0-alpha.2" as const;
-export const BUILD_ID = "ab-runtime@0.3.0-alpha.2+4a3d34554815f819" as const;
+export const BUILD_ID = "ab-runtime@0.3.0-alpha.2+f853130ced277e95" as const;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 

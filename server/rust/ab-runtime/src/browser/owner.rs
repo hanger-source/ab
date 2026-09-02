@@ -1,6 +1,7 @@
 use super::session_manager::SessionManager;
 use super::target_lane::{TargetLane, TargetState};
 use crate::error::{AbError, AbResult};
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex, OwnedMutexGuard};
@@ -14,6 +15,7 @@ struct LaneRegistry {
 pub struct BrowserOwner {
     sessions: Arc<SessionManager>,
     lanes: Mutex<LaneRegistry>,
+    input_surface: Arc<Mutex<()>>,
 }
 
 impl BrowserOwner {
@@ -21,6 +23,7 @@ impl BrowserOwner {
         Ok(Arc::new(Self {
             sessions: SessionManager::connect(ws_url).await?,
             lanes: Mutex::new(LaneRegistry::default()),
+            input_surface: Arc::new(Mutex::new(())),
         }))
     }
 
@@ -44,6 +47,33 @@ impl BrowserOwner {
         target_id: &str,
     ) -> AbResult<OwnedMutexGuard<TargetState>> {
         self.lock_target_inner(target_id, true).await
+    }
+
+    /// Own the one headed-Chrome surface that can reliably receive browser
+    /// input. The target remains explicit at the API boundary; this lease only
+    /// serializes physical input across tabs and makes that exact target active
+    /// before dispatch.
+    /// Design evidence:
+    /// `docs/evidence/20260902__action-resource-ownership__@codex.md`.
+    pub async fn lock_input_surface(&self, target_id: &str) -> AbResult<OwnedMutexGuard<()>> {
+        let guard = Arc::clone(&self.input_surface).lock_owned().await;
+        self.sessions.target(target_id).await?;
+        self.sessions
+            .client()
+            .send_command(
+                "Target.activateTarget",
+                Some(json!({ "targetId": target_id })),
+                None,
+            )
+            .await
+            .map_err(|message| {
+                AbError::new(
+                    "target_activation_failed",
+                    "browser_owner.input_surface.activate",
+                    message,
+                )
+            })?;
+        Ok(guard)
     }
 
     async fn lock_target_inner(

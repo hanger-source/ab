@@ -394,8 +394,6 @@ function assertActionResult(
   assert.equal(result.navigation.changed, false);
   assert.equal(result.document.changed, false);
   assert.equal(result.dialog.opened, false);
-  assert.equal(result.fileChooser.opened, false);
-  assert.equal(result.fileChooser.complete, true);
   assert.deepEqual(result.observationOutcome, { status: "completed" });
   assert.equal(result.lastStage, "action.post_observation.completed");
 }

@@ -80,7 +80,7 @@ Pointer gate 的 session 初始化分成两个有先后约束的阶段：`Page.a
 
 `server/rust/ab-runtime/src/browser/core.rs` 的 `ActionTransaction` 在 action preparation 前订阅两份浏览器事件流，但在真正 input dispatch 的同步 hook 中同时 `resubscribe()`，因此 preparation 期间的 background traffic 不会被误归因给本次动作。
 
-dispatch 后两份 receiver 的责任不同：action stream 只处理 acted frame 的 navigation 和 file chooser；只有调用者请求 post-action observation 时，observation stream 才等待同一 frame 的相关 XHR/Fetch 与 page effect，随后进入 DOM/finite-animation settle 和 AX capture。它不再像旧 `collect_file_chooser()` 一样丢掉导航，也不再让 `observe:none` 为了来源页 background Fetch 等待。最终结果的事实源按 owner 分开：
+dispatch 后两份 receiver 的责任不同：action stream 只处理 acted frame 的 navigation；只有调用者请求 post-action observation 时，observation stream 才等待同一 frame 的相关 XHR/Fetch 与 page effect，随后进入 DOM/finite-animation settle 和 AX capture。file chooser interception 和 identity 只属于动作前显式建立的 watcher。它不再像旧 `collect_file_chooser()` 一样丢掉导航，也不再让 `observe:none` 为了来源页 background Fetch 等待。最终结果的事实源按 owner 分开：
 
 - top-level current URL 来自 `SessionManager` 的 Target record；
 - frame document generation 来自 Frame registry；
@@ -198,6 +198,6 @@ popup 的责任落在 SessionManager，而不是 ActionTransaction。第一次�
 
 Action/observation owner 拆分后的正式产品构建统一为 `ab-runtime@0.3.0-alpha.2+4a3d34554815f819`。SDK typecheck、23 个 Agent documentation topics、protocol generation、workspace 1156 tests 和 workspace clippy `-D warnings` 通过；同一正式产物的默认 live suite 再次单次 20/20。更新后的 async SPA 场景同时证明无 observation action 不等待 route response、请求 diff 的 action 返回 destination URL/AX；跨域 popup 场景 action 266ms，child 正常发布。OOPIF、large document、overlay、animation、pointer sequence、Locator、resources、cancellation、scheduler concurrency、multi-tab HAR、npm package 和 self-contained Skill client 均在同一 run 内通过。
 
-固定 profile 仍由旧 build 的真实 owner 使用。新构建连接时旧 daemon 明确返回 `ee830113781e06bf still has active owners`，因此修复后的同一登录小红书页面尚未在新产品构建上复测；不能通过强杀旧 daemon 或复制登录凭据制造闭环。当前 20/20 证明产品链和相邻 owner 没有回归，公开 GitHub 证明真实 top-level popup 已修复，但两者都不冒充这份唯一登录现场的最终复测。
+旧 owner 退出后，仓库正式产物 `ab-runtime@0.3.0-alpha.2+4a3d34554815f819` 已重新连接同一固定登录 profile。2026-09-02 的复测从“阿波CD”搜索结果进入笔记“您的爱车疑似遭到破坏。”，再原样执行 `tab.ax.click("e4", { write: "state", maxChars: 4000 })`。进入详情耗时 1070ms；作者动作耗时 1683ms，Rust `ActionResult.timing.durationMs=1640`、`observationOutcome.status="completed"`、`lastStage="action.post_observation.completed"`，Codex native Node REPL 没有 reset。当前站点行为是打开独立作者主页 tab，而不是替换来源 tab；child 随后用 186ms 得到包含作者主页内容的 AX state。该次运行没有记录来源 tab 的 `visibilityState`，所以它只闭合真实登录流程与 popup 可用性，不冒充后台 rAF 证据；后台条件由上述确定性场景独立持有。
 
 这些是当前设计的审计边界，不是 fallback 授权。任何后续调整都应落在实际拥有该事实的 Pointer Action、ActionTransaction 或 SessionManager，并在本文件和对应 scenario 中说明原因。

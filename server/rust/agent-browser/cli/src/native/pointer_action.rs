@@ -7,11 +7,12 @@
 //! Design and evidence:
 //! `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
 //! Deterministic regressions:
-//! `test/ab/scenarios/pointer-hit-target-layout-shift/README.md` and
+//! `test/ab/scenarios/pointer-hit-target-layout-shift/README.md`,
+//! `test/ab/scenarios/background-tab-popup-action/README.md`, and
 //! `test/ab/scenarios/async-spa-navigation/README.md`.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::time::sleep;
@@ -71,6 +72,7 @@ pub async fn prepare(
     iframe_sessions: &HashMap<String, String>,
     attempt: usize,
 ) -> Result<PreparedPointerAction, String> {
+    let started = Instant::now();
     let delay = RETRY_DELAYS_MS[attempt.min(RETRY_DELAYS_MS.len() - 1)];
     if delay != 0 {
         sleep(Duration::from_millis(delay)).await;
@@ -84,10 +86,14 @@ pub async fn prepare(
         iframe_sessions,
     )
     .await?;
+    debug_prepare_stage(attempt, "resolved", started.elapsed());
     let alignment = SCROLL_ALIGNMENTS[attempt % SCROLL_ALIGNMENTS.len()];
     prepare_actionability(client, &session_id, &object_id, alignment).await?;
+    debug_prepare_stage(attempt, "actionable", started.elapsed());
     let (x, y) = stable_clickable_point(client, &session_id, &object_id).await?;
+    debug_prepare_stage(attempt, "stable", started.elapsed());
     arm_hit_target_gate(client, &session_id, &object_id, x, y).await?;
+    debug_prepare_stage(attempt, "armed", started.elapsed());
 
     Ok(PreparedPointerAction {
         x,
@@ -95,6 +101,17 @@ pub async fn prepare(
         session_id,
         object_id,
     })
+}
+
+fn debug_prepare_stage(attempt: usize, stage: &str, elapsed: Duration) {
+    if std::env::var("AGENT_BROWSER_DEBUG").is_ok() {
+        eprintln!(
+            "[agent-browser.pointer] attempt={} stage={} elapsed_ms={}",
+            attempt,
+            stage,
+            elapsed.as_millis()
+        );
+    }
 }
 
 pub async fn stop(client: &CdpClient, prepared: &PreparedPointerAction) -> Result<(), String> {

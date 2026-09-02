@@ -131,34 +131,6 @@ pub struct DialogOutcome {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FileChooserOutcome {
-    pub opened: bool,
-    pub complete: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub frame_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend_node_id: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
-}
-
-impl FileChooserOutcome {
-    pub fn none() -> Self {
-        Self {
-            opened: false,
-            complete: true,
-            session_id: None,
-            frame_id: None,
-            backend_node_id: None,
-            mode: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub enum ActionObservationStatus {
     NotRequested,
     Completed,
@@ -224,7 +196,6 @@ pub struct ActionResult {
     pub navigation: NavigationChange,
     pub document: DocumentChange,
     pub dialog: DialogOutcome,
-    pub file_chooser: FileChooserOutcome,
     pub pending_release: bool,
     pub observation_outcome: ActionObservationOutcome,
     pub last_stage: String,

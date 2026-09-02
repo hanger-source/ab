@@ -80,6 +80,8 @@ tab.close(options?)
 
 `Tab.id` is the Chrome target id and remains stable across navigation. A task must not close a tab it did not create unless the user explicitly asked.
 
+`Tab.active` is the activity snapshot captured when that `Tab` descriptor was returned; it is not a live selector and does not choose a later action target. `tab.activate()` only makes a tab visible. Pointer, keyboard, focus, and form-input actions already acquire the Rust Browser Owner's physical-input lease and activate the exact tab named by the call before dispatch.
+
 ## Agent AX observation and refs
 
 ```ts
@@ -201,14 +203,6 @@ type ActionResult = {
   navigation: { beforeUrl: string; afterUrl: string; changed: boolean };
   document: { beforeGeneration: string; afterGeneration: string; changed: boolean };
   dialog: { opened: boolean; dialog?: DialogInfo };
-  fileChooser: {
-    opened: boolean;
-    complete: boolean;
-    sessionId?: string;
-    frameId?: string;
-    backendNodeId?: number;
-    mode?: string;
-  };
   pendingRelease: boolean;
   lastStage: string;
   data: unknown;
@@ -216,7 +210,7 @@ type ActionResult = {
 };
 ```
 
-The result reports browser mechanics, not business success. `fileChooser.complete === false` means an event-stream gap prevents concluding that no chooser opened.
+The result reports action mechanics, not business success. File chooser identity and completeness belong to an explicit `FileChooserWatcher`, which must be created before the triggering action.
 
 `textContent`, `innerText`, `getAttribute`, `boundingBox`, and `screenshot` are typed reads. `domInvoke` is an explicit mutation and returns `ActionResult<{ value?: T }>`; read its return value from `result.data.value`.
 

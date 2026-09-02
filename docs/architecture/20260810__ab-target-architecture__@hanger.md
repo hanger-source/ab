@@ -70,6 +70,7 @@ Node.js ESM 是正式用户运行时。交互模式是宿主管理的持久 Java
 | Locator 查询 | TypeScript `Locator` | 不可变 Query AST；执行结果仍由 Rust 决定 |
 | ElementHandle | Rust `ElementRegistry` | resource id + document identity |
 | network/console/dialog/download/script | Rust `ResourceRegistry` | resource handle 与 sequence cursor |
+| headed Chrome active input surface | Rust `BrowserOwner` | 显式 target handle；不缓存 current tab |
 | request Promise/AbortSignal | TypeScript client transport | request id |
 | artifact 文件 | Rust `ArtifactStore` | path/hash/bytes/mediaType descriptor |
 
@@ -428,7 +429,7 @@ bind target/session
   -> sample stable geometry
   -> compute frame/OOPIF coordinates
   -> hit-test
-  -> arm navigation/dialog/file-chooser observers
+  -> arm action-owned navigation/dialog observers
   -> dispatch CDP input/form command
   -> collect action result
   -> optional post-action observation/diff
@@ -438,7 +439,7 @@ bind target/session
 
 Locator 在 `not_found`、尚不可见、尚不稳定等可恢复机械状态上可以在 deadline 内重新查询。多匹配、document replacement、frame detach、权限错误与协议错误立即失败。AXRef/ElementHandle 只允许对同一 backend node 重做机械检查，绝不语义重定位。
 
-动作返回 `ActionResult`：目标 identity、实际派发机制、开始/结束时间、navigation/document 变化、dialog/file chooser、最后 stage，以及调用者明确要求的 post-action observation。它不声称业务完成。
+动作返回 `ActionResult`：目标 identity、实际派发机制、开始/结束时间、navigation/document 变化、dialog、最后 stage，以及调用者明确要求的 post-action observation。它不声称业务完成。file chooser 由动作前显式创建的 Resource watcher 独立持有 interception、identity、completeness 和 dispose；普通动作不临时开启该 feature。
 
 ## 九、资源与信号
 
@@ -465,12 +466,12 @@ Init script 使用 `Page.addScriptToEvaluateOnNewDocument`、isolated world 与 
 
 - 每条 SDK connection 对应一个 client session；socket EOF 只回收该 client 拥有的临时 resource，不关闭共享 Chrome 或其他 client；
 - 同一 tab 的写动作顺序执行；只读 capture 可在不会打断 domain/realm 的前提下并发；
-- 跨 tab 独立调度；
+- 跨 tab 的读取、DOM-only mutation、target lifecycle、Resource 和 post-action observation 按 target 独立调度；pointer、keyboard、focus、form-input 与 CUA input 经过 BrowserOwner 的 browser-global input-surface lease 串行执行，并在 dispatch 前激活调用者明确指定的 target；
 - navigation、dialog 和 file chooser watcher 必须在动作前装配；
 - SDK cancel 立即结束调用者等待，但 Rust 要把底层命令真实终态记录为 completed/cancelled/outcome_unknown；
 - `browser.disconnect()` 与 socket EOF 释放当前 client resource；target close、frame detach、document replacement、Chrome crash 和 daemon exit 按 identity 向下传播失效；
 - daemon crash 不要求 Chrome 跟着退出；新 daemon 只能重连经过固定 profile 与 `DevToolsActivePort` 验证的受管 Chrome；
-- Rust/Core 没有隐式 active tab、current frame、latest observation 或全局 capture 开关；Agent facade 只有按 Agent session + tab 隔离的 last-presented observation id。
+- Rust/Core 不用隐式 active tab 选择 action target，也不维护 current frame、latest observation 或全局 capture 开关；显式 target 的物理输入操作会在 action-scoped input lease 内成为 Chrome active surface，DOM-only mutation 不要求切换活动页。Agent facade 只有按 Agent session + tab 隔离的 last-presented observation id。
 
 ## 十一、错误与诊断
 

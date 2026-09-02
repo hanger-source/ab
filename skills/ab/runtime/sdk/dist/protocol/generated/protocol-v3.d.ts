@@ -1,6 +1,6 @@
 export declare const PROTOCOL_VERSION: 3;
 export declare const SDK_VERSION: "0.3.0-alpha.2";
-export declare const BUILD_ID: "ab-runtime@0.3.0-alpha.2+4a3d34554815f819";
+export declare const BUILD_ID: "ab-runtime@0.3.0-alpha.2+f853130ced277e95";
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
     [key: string]: JsonValue;
 };

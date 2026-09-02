@@ -51,6 +51,15 @@ try {
   const actionMs = Math.round(performance.now() - started);
 
   assert.match(action.dispatchMechanism, /^cdp\./);
+  if (action.observationOutcome.status !== "completed") {
+    console.error(JSON.stringify({
+      checkpoint: "popup-source-observation-failed",
+      actionMs,
+      action,
+      tabs: (await browser.tabs.list()).map(({ id, title, url }) => ({ id, title, url })),
+      profileRequests,
+    }, null, 2));
+  }
   assert.equal(action.observationOutcome.status, "completed");
   const clicks = await detail.getByRole("status").all();
   const status = await Promise.all(clicks.map(async (item) => item.textContent()));

@@ -5,7 +5,7 @@ use super::target_lane::TargetState;
 use crate::actions::{
     dispatch_mechanism, ActionCoordinateIdentity, ActionDispatchMarker, ActionObservationOutcome,
     ActionResult, ActionRunner, ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange,
-    FileChooserOutcome, NavigationChange,
+    NavigationChange,
 };
 use crate::agent_browser_engine::cdp::types::CdpEvent;
 use crate::agent_browser_engine::interaction;
@@ -154,6 +154,8 @@ pub struct DialogSubscription {
 /// Deterministic timing regressions:
 /// `test/ab/scenarios/async-spa-navigation/README.md` and
 /// `test/ab/scenarios/animated-surface-dismissal/README.md`.
+/// The combined hidden-source/popup lifecycle is preserved by
+/// `test/ab/scenarios/background-tab-popup-action/README.md`.
 struct ActionTransaction {
     id: String,
     action: String,
@@ -397,6 +399,7 @@ impl BrowserCore {
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
         let mut lane = self.owner.lock_target(target_id).await?;
+        let input_surface = self.owner.lock_input_surface(target_id).await?;
         let context = self.context(target_id).await?;
         let viewport = viewport_state(&context, &self.generation).await?;
         if let Some(expected) = params.get("viewportId").and_then(Value::as_str) {
@@ -503,10 +506,7 @@ impl BrowserCore {
                         "dialogSessionId": dialog_session_id,
                     })
                 }
-                Err(error) => {
-                    self.abort_action(&transaction).await;
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         } else if let Some((end_x, end_y)) = drag_end {
             match ActionRunner::drag_coordinates(
@@ -520,10 +520,7 @@ impl BrowserCore {
             .await
             {
                 Ok(value) => value,
-                Err(error) => {
-                    self.abort_action(&transaction).await;
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         } else {
             let mut wire = json!({ "type": event_type, "x": x, "y": y });
@@ -542,10 +539,7 @@ impl BrowserCore {
                 .map_err(|message| browser_error("cua.dispatch", message))
             {
                 Ok(value) => value,
-                Err(error) => {
-                    self.abort_action(&transaction).await;
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         };
         let mut action_data = json!({
@@ -564,6 +558,7 @@ impl BrowserCore {
             action_data["endX"] = json!(end_x);
             action_data["endY"] = json!(end_y);
         }
+        drop(input_surface);
         let result = self
             .finish_action(
                 client_id,
@@ -723,10 +718,6 @@ impl BrowserCore {
         let id = Uuid::new_v4().to_string();
         let action_events = context.sessions.subscribe_browser_events();
         let observation_events = observe.then(|| context.sessions.subscribe_browser_events());
-        context
-            .sessions
-            .acquire_feature(&context.target_id, "fileChooser", &id)
-            .await?;
         let frame = context
             .frames
             .iter()
@@ -752,18 +743,6 @@ impl BrowserCore {
         })
     }
 
-    async fn abort_action(&self, transaction: &ActionTransaction) {
-        let _ = self
-            .owner
-            .sessions()
-            .release_feature(
-                &transaction.target.target_id,
-                "fileChooser",
-                &transaction.id,
-            )
-            .await;
-    }
-
     async fn finish_action(
         &self,
         client_id: &str,
@@ -780,10 +759,7 @@ impl BrowserCore {
             .await
         {
             Ok(opened) => opened,
-            Err(error) => {
-                self.abort_action(&transaction).await;
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
         let sessions = self.owner.sessions();
         let mut action_events = transaction.take_action_events();
@@ -792,7 +768,7 @@ impl BrowserCore {
             .then(|| transaction.take_observation_events());
         let dialog = sessions.dialog_for_target(&target_id).await;
         let dialog_blocking = dialog_opened || dialog.is_some();
-        let action_signals_future = collect_action_signals(
+        let action_navigation_future = wait_for_action_navigation(
             Arc::clone(&sessions),
             &target_id,
             &transaction.target.frame_id,
@@ -860,10 +836,7 @@ impl BrowserCore {
                 None
             }
         };
-        let (action_signals, capture) = tokio::join!(action_signals_future, capture_future);
-        sessions
-            .release_feature(&target_id, "fileChooser", &transaction.id)
-            .await?;
+        let (_, capture) = tokio::join!(action_navigation_future, capture_future);
 
         let (observation, observation_outcome) = if let Some(capture) = capture {
             match capture {
@@ -922,7 +895,6 @@ impl BrowserCore {
                 opened: dialog_blocking,
                 dialog,
             },
-            file_chooser: action_signals.file_chooser,
             pending_release: lane.pending_release.is_some(),
             last_stage: observation_outcome.last_stage().to_owned(),
             observation_outcome,
@@ -1053,6 +1025,11 @@ impl BrowserCore {
                 deadline,
             )
             .await?;
+        let input_surface = if requires_active_input_surface(operation) {
+            Some(self.owner.lock_input_surface(&target.target_id).await?)
+        } else {
+            None
+        };
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             transaction.mark_dispatch(dispatch_marker);
             ActionRunner::drag(&context, &target, drag_target).await
@@ -1068,12 +1045,10 @@ impl BrowserCore {
             )
             .await
         };
+        drop(input_surface);
         let value = match outcome {
             Ok(value) => value,
-            Err(error) => {
-                self.abort_action(&transaction).await;
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
         let result = self
             .finish_action(
@@ -1104,6 +1079,7 @@ impl BrowserCore {
         deadline: Instant,
         dispatch_marker: &ActionDispatchMarker,
     ) -> AbResult<Value> {
+        let diagnostic_started = std::time::Instant::now();
         let observation_id = required_string(params, "observationId", "action.observation")?;
         let ref_id = required_string(params, "refId", "action.ref")?.trim_start_matches('@');
         let action = required_string(params, "action", "action.kind")?;
@@ -1169,7 +1145,17 @@ impl BrowserCore {
             name: entry.name,
         };
         let mut lane = self.owner.lock_target(target_id).await?;
+        action_diagnostic(
+            action,
+            "target_locked",
+            diagnostic_started.elapsed().as_millis(),
+        );
         let context = self.context(target_id).await?;
+        action_diagnostic(
+            action,
+            "context_resolved",
+            diagnostic_started.elapsed().as_millis(),
+        );
         if action == "screenshot" {
             return self
                 .capture_target_screenshot(client_id, &context, &target, &mut lane)
@@ -1212,6 +1198,16 @@ impl BrowserCore {
                 deadline,
             )
             .await?;
+        action_diagnostic(
+            action,
+            "transaction_armed",
+            diagnostic_started.elapsed().as_millis(),
+        );
+        let input_surface = if requires_active_input_surface(action) {
+            Some(self.owner.lock_input_surface(target_id).await?)
+        } else {
+            None
+        };
         let outcome = if let Some(drag_target) = drag_target.as_ref() {
             transaction.mark_dispatch(dispatch_marker);
             ActionRunner::drag(&context, &target, drag_target).await
@@ -1227,12 +1223,10 @@ impl BrowserCore {
             )
             .await
         };
+        drop(input_surface);
         let outcome = match outcome {
             Ok(outcome) => outcome,
-            Err(error) => {
-                self.abort_action(&transaction).await;
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
         let result = self
             .finish_action(
@@ -1343,6 +1337,11 @@ impl BrowserCore {
                             deadline,
                         )
                         .await?;
+                    let input_surface = if requires_active_input_surface(&request.operation) {
+                        Some(self.owner.lock_input_surface(target_id).await?)
+                    } else {
+                        None
+                    };
                     let outcome = if request.operation == "drag" {
                         transaction.mark_dispatch(dispatch_marker);
                         let drag_request = request
@@ -1401,6 +1400,7 @@ impl BrowserCore {
                         )
                         .await
                     };
+                    drop(input_surface);
                     match outcome {
                         Ok(value) => {
                             let result = self
@@ -1419,18 +1419,13 @@ impl BrowserCore {
                             if retryable_action(&error)
                                 && !locator_retry_budget_exhausted(deadline) =>
                         {
-                            self.abort_action(&transaction).await;
                             drop(lane);
                             sleep(LOCATOR_RETRY_INTERVAL).await;
                         }
                         Err(error) if retryable_action(&error) => {
-                            self.abort_action(&transaction).await;
                             return Err(locator_deadline_error(&request, &error));
                         }
-                        Err(error) => {
-                            self.abort_action(&transaction).await;
-                            return Err(error);
-                        }
+                        Err(error) => return Err(error),
                     }
                 }
                 Err(error)
@@ -2049,6 +2044,12 @@ impl BrowserCore {
     }
 }
 
+fn action_diagnostic(action: &str, stage: &str, elapsed_ms: u128) {
+    if std::env::var_os("AGENT_BROWSER_DEBUG").is_some() {
+        eprintln!("[ab.action] action={action} stage={stage} elapsed_ms={elapsed_ms}");
+    }
+}
+
 fn tab_info(target: super::session_manager::TargetSession, active: bool) -> TabInfo {
     TabInfo {
         id: target.target_id,
@@ -2376,11 +2377,31 @@ fn returns_action_result(operation: &str) -> bool {
     )
 }
 
-struct ActionSignals {
-    file_chooser: FileChooserOutcome,
+/// Headed Chrome has one reliable physical-input surface. DOM-only mutations
+/// remain target-lane operations and must not be serialized behind that
+/// browser-global lease. See
+/// `docs/evidence/20260902__action-resource-ownership__@codex.md`.
+fn requires_active_input_surface(operation: &str) -> bool {
+    matches!(
+        operation,
+        "click"
+            | "dblclick"
+            | "hover"
+            | "wheel"
+            | "fill"
+            | "type"
+            | "press"
+            | "focus"
+            | "clear"
+            | "scrollintoview"
+            | "scrollIntoView"
+            | "check"
+            | "uncheck"
+            | "drag"
+    )
 }
 
-async fn collect_action_signals(
+async fn wait_for_action_navigation(
     sessions: Arc<super::session_manager::SessionManager>,
     target_id: &str,
     action_frame_id: &str,
@@ -2388,23 +2409,21 @@ async fn collect_action_signals(
     before_url: &str,
     receiver: &mut broadcast::Receiver<CdpEvent>,
     request_deadline: Instant,
-) -> ActionSignals {
+) {
     let available = request_deadline
         .saturating_duration_since(Instant::now())
         .saturating_sub(ACTION_RESPONSE_RESERVE);
     if available.is_zero() {
-        let mut outcome = FileChooserOutcome::none();
-        outcome.complete = false;
-        return ActionSignals {
-            file_chooser: outcome,
-        };
+        return;
     }
 
-    // The action owns browser-level consequences of its input: a chooser and
-    // navigation of the frame that received the action. Application XHR/Fetch
-    // belongs to an optional post-action observation, not input completion.
+    // The action owns navigation of the frame that received the input.
+    // File choosers belong exclusively to an explicit FileChooserWatcher,
+    // which enables interception before the triggering action. Popup targets
+    // belong to SessionManager. Application XHR/Fetch belongs to an optional
+    // post-action observation, not input completion.
     // Design evidence:
-    // `docs/evidence/20260902__pointer-action-transaction-and-spa-navigation__@codex.md`.
+    // `docs/evidence/20260902__action-resource-ownership__@codex.md`.
     const DISCOVERY_WINDOW: Duration = Duration::from_millis(100);
     const QUIET_WINDOW: Duration = Duration::from_millis(100);
     const MAX_SIGNAL_WAIT: Duration = Duration::from_secs(2);
@@ -2414,7 +2433,6 @@ async fn collect_action_signals(
     let mut discovery_deadline = started + available.min(DISCOVERY_WINDOW);
     let mut activity_seen = false;
     let mut quiet_since: Option<Instant> = None;
-    let mut file_chooser = FileChooserOutcome::none();
     let mut navigation_committed = false;
 
     loop {
@@ -2429,13 +2447,13 @@ async fn collect_action_signals(
             quiet_since = Some(now);
         }
         if !activity_seen && now >= discovery_deadline {
-            return ActionSignals { file_chooser };
+            return;
         }
         if activity_seen
             && quiet_since
                 .is_some_and(|quiet_start| now.duration_since(quiet_start) >= QUIET_WINDOW)
         {
-            return ActionSignals { file_chooser };
+            return;
         }
 
         let wake_at = if !activity_seen {
@@ -2447,10 +2465,7 @@ async fn collect_action_signals(
         };
         let remaining = wake_at.saturating_duration_since(now);
         if remaining.is_zero() {
-            if Instant::now() >= deadline {
-                file_chooser.complete = false;
-            }
-            return ActionSignals { file_chooser };
+            return;
         }
 
         match timeout(remaining, receiver.recv()).await {
@@ -2466,27 +2481,6 @@ async fn collect_action_signals(
                 }
 
                 match event.method.as_str() {
-                    "Page.fileChooserOpened" => {
-                        file_chooser = FileChooserOutcome {
-                            opened: true,
-                            complete: true,
-                            session_id: Some(session_id.to_owned()),
-                            frame_id: event
-                                .params
-                                .get("frameId")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                            backend_node_id: event
-                                .params
-                                .get("backendNodeId")
-                                .and_then(Value::as_i64),
-                            mode: event
-                                .params
-                                .get("mode")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                        };
-                    }
                     method
                         if is_navigation_start_signal(method)
                             && event_frame_id(&event) == Some(action_frame_id) =>
@@ -2517,15 +2511,9 @@ async fn collect_action_signals(
             }
             Ok(Err(broadcast::error::RecvError::Lagged(_)))
             | Ok(Err(broadcast::error::RecvError::Closed)) => {
-                file_chooser.complete = false;
-                return ActionSignals { file_chooser };
+                return;
             }
-            Err(_) => {
-                if Instant::now() >= deadline {
-                    file_chooser.complete = false;
-                }
-                return ActionSignals { file_chooser };
-            }
+            Err(_) => return,
         }
     }
 }

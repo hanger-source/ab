@@ -248,16 +248,7 @@ export class Locator {
         ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
         : {}),
     });
-    this.#ax.applyActionResult(result.selection);
-    if (write === "diff") {
-      if (result.selection.observation) {
-        await this.#ax.write(result.selection.observation);
-      } else {
-        await this.#ax.presentActionObservationOutcome(result.selection);
-      }
-    } else if (write === "state" && result.selection.observation) {
-      await this.#ax.write(result.selection.observation);
-    }
+    await this.#ax.presentActionResult(result.selection, write);
     return result;
   }
 
@@ -373,16 +364,7 @@ export class Locator {
         ? { observation: { mode: "full", surface: "active", maxChars: OBSERVATION_MAX_CHARS } as const }
         : {}),
     });
-    this.#ax.applyActionResult(result);
-    if (write === "diff") {
-      if (result.observation) {
-        await this.#ax.write(result.observation);
-      } else {
-        await this.#ax.presentActionObservationOutcome(result);
-      }
-    } else if (write === "state" && result.observation) {
-      await this.#ax.write(result.observation);
-    }
+    await this.#ax.presentActionResult(result, write);
     return result;
   }
 }
