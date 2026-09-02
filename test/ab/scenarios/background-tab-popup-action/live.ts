@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { join } from "node:path";
-import { connect } from "../../../../sdk/ts/src/index.ts";
+import {
+  connect,
+  type Presenter,
+  type TextPresentation,
+} from "../../../../sdk/ts/src/agent/index.ts";
 
 const runtimeDirectory = requiredEnv("AB_RUNTIME_DIR");
 let profileRequests = 0;
+const presentations: TextPresentation[] = [];
+const presenter: Presenter = {
+  presentText(value) {
+    presentations.push(value);
+  },
+  presentImage() {},
+};
 
 const profileServer = http.createServer((request, response) => {
   if (request.url === "/profile") profileRequests += 1;
   response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-  response.end("<!doctype html><html><head><title>Background author profile</title></head><body><h1>Background author profile</h1></body></html>");
+  response.end("<!doctype html><html><head><title>Background author profile</title></head><body><h1>Background author profile</h1><button onclick='setTimeout(() => window.close(), 50)'>Close profile</button></body></html>");
 });
 await listen(profileServer);
 const profileOrigin = originOf(profileServer);
@@ -52,10 +63,11 @@ await listen(sourceServer);
 let chromePid: number | null = null;
 try {
   const sourceOrigin = originOf(sourceServer);
-  const browser = await connect();
+  const browser = await connect({ presenter });
+  await browser.documentation("evaluate");
   chromePid = browser.identity.chrome.pid;
   const detail = await browser.tabs.open(sourceOrigin);
-  const baseline = await detail.ax.snapshot({
+  const baseline = await detail.ax.write("state", {
     mode: "full",
     surface: "active",
     maxChars: 4_000,
@@ -66,7 +78,7 @@ try {
   const cover = await browser.tabs.open(`${sourceOrigin}/cover`);
   await cover.activate();
 
-  const hiddenProbe = await detail.evaluate(async () => {
+  const hiddenProbe = await detail.dev.evaluate(async () => {
     let rafFired = false;
     requestAnimationFrame(() => {
       rafFired = true;
@@ -80,13 +92,13 @@ try {
     "the source must be a background document whose page rAF is suppressed",
   );
 
-  await detail.evaluate(() => {
+  await detail.dev.evaluate(() => {
     (globalThis as typeof globalThis & { __pointerStartedAt: number }).__pointerStartedAt = performance.now();
   });
   const started = performance.now();
   let action;
   try {
-    action = await author.click({ observe: "none", timeoutMs: 5_000 });
+    action = await detail.ax.click(author.id, { timeoutMs: 5_000 });
   } catch (error) {
     const structuredError = error as Error & {
       kind?: string;
@@ -109,7 +121,7 @@ try {
         : String(error),
       trace: traceId ? browser.diagnostics.snapshot({ traceId }) : null,
       tabs: (await browser.tabs.list()).map(({ id, title, url }) => ({ id, title, url })),
-      pointerEvents: await detail.evaluate(
+      pointerEvents: await detail.dev.evaluate(
         () => (globalThis as typeof globalThis & {
           __pointerEvents: Array<{ type: string; elapsedMs: number; trusted: boolean }>;
         }).__pointerEvents,
@@ -119,7 +131,7 @@ try {
     throw error;
   }
   const actionMs = Math.round(performance.now() - started);
-  const pointerEvents = await detail.evaluate(
+  const pointerEvents = await detail.dev.evaluate(
     () => (globalThis as typeof globalThis & {
       __pointerEvents: Array<{ type: string; elapsedMs: number; trusted: boolean }>;
     }).__pointerEvents,
@@ -128,6 +140,17 @@ try {
   console.log(JSON.stringify({ checkpoint: "background-action-returned", actionMs, action, pointerEvents }, null, 2));
   assert.match(action.dispatchMechanism, /^cdp\./);
   assert.equal(action.observationOutcome.status, "notRequested");
+  assert.equal(action.targetChanges.opened.length, 1, "the action must report its ready child target");
+  assert.deepEqual(action.targetChanges.closed, []);
+  const opened = action.targetChanges.opened[0];
+  assert.equal(opened.openerId, detail.id);
+  assert.equal(opened.url, `${profileOrigin}/profile`);
+  assert.equal(opened.ownership, "owned");
+  const targetPresentation = presentations.find(
+    (value) => value.kind === "action" && value.text.startsWith("AB_BROWSER_CHANGE "),
+  );
+  assert(targetPresentation, "the Agent Presenter must announce non-empty target changes");
+  assert.match(targetPresentation.text, new RegExp(opened.targetId));
   assert.deepEqual(
     pointerEvents.map(({ type, trusted }) => ({ type, trusted })),
     [
@@ -138,12 +161,13 @@ try {
     ],
     "the bound AX ref must dispatch one complete trusted pointer sequence",
   );
-  const sourceStatus = await detail.getByRole("status").all();
+  const sourceStatus = await detail.playwright.getByRole("status").all();
   const status = await Promise.all(sourceStatus.map(async (item) => item.textContent()));
   assert.deepEqual(status, ["1", "true"], "the hidden source must receive one trusted activation");
 
-  const profile = await waitForProfileTab(browser, `${profileOrigin}/profile`, 5_000);
-  const profileState = await profile.ax.snapshot({
+  const profile = await browser.tabs.get(opened.targetId);
+  await profile.playwright.waitForLoadState("load", { timeoutMs: 5_000 });
+  const profileState = await profile.ax.write("state", {
     mode: "full",
     surface: "active",
     maxChars: 4_000,
@@ -151,6 +175,17 @@ try {
   });
   assert.match(profileState.text, /heading "Background author profile"/);
   assert.equal(profileRequests, 1, "the hidden-tab click must navigate one popup exactly once");
+  const closeAction = await profile.playwright
+    .getByRole("button", { name: "Close profile", exact: true })
+    .click({ timeoutMs: 5_000 });
+  assert.deepEqual(closeAction.targetChanges.opened, []);
+  assert.deepEqual(closeAction.targetChanges.closed, [{ targetId: profile.id }]);
+  const closePresentation = presentations.find(
+    (value) => value.kind === "action"
+      && value.text.startsWith("AB_BROWSER_CHANGE ")
+      && value.text.includes(`\"closed\":[{\"targetId\":\"${profile.id}\"}]`),
+  );
+  assert(closePresentation, "the Agent Presenter must announce the closed root target");
 
   console.log(JSON.stringify({
     scenario: "background-tab-popup-action",
@@ -160,6 +195,9 @@ try {
     dispatchMechanism: action.dispatchMechanism,
     observationStatus: action.observationOutcome.status,
     childTabId: profile.id,
+    targetChanges: action.targetChanges,
+    targetPresentation: targetPresentation.text,
+    closeTargetChanges: closeAction.targetChanges,
     profileRequests,
     status,
   }, null, 2));
@@ -189,25 +227,6 @@ function originOf(server: http.Server): string {
 
 async function close(server: http.Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-}
-
-async function waitForProfileTab(
-  browser: Awaited<ReturnType<typeof connect>>,
-  url: string,
-  timeoutMs: number,
-) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const tab = (await browser.tabs.list()).find((candidate) => candidate.url === url);
-    if (tab) return tab;
-    await Bun.sleep(25);
-  }
-  const tabs = (await browser.tabs.list()).map(({ id, title, url: currentUrl }) => ({
-    id,
-    title,
-    url: currentUrl,
-  }));
-  throw new Error(`background popup did not become ready at ${url}; profileRequests=${profileRequests}; tabs=${JSON.stringify(tabs)}`);
 }
 
 async function stopDaemon(socketPath: string): Promise<void> {

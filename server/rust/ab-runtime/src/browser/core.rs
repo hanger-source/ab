@@ -4,9 +4,9 @@ use super::session_manager::{DialogLifecycle, FrameState, RealmState};
 use super::target_lane::TargetState;
 use super::target_leases::TargetOwnership;
 use crate::actions::{
-    dispatch_mechanism, ActionCoordinateIdentity, ActionDispatchMarker, ActionObservationOutcome,
-    ActionResult, ActionRunner, ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange,
-    NavigationChange,
+    dispatch_mechanism, ActionClosedTarget, ActionCoordinateIdentity, ActionDispatchMarker,
+    ActionObservationOutcome, ActionOpenedTarget, ActionResult, ActionRunner, ActionTargetChanges,
+    ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange, NavigationChange,
 };
 use crate::agent_browser_engine::actions::route_url_matches;
 use crate::agent_browser_engine::cdp::types::CdpEvent;
@@ -170,14 +170,31 @@ struct ActionTransaction {
     root_frame_id: String,
     action_events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
     observation_events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
+    target_signal_events: Arc<std::sync::Mutex<Option<broadcast::Receiver<CdpEvent>>>>,
+    target_lifecycle: Arc<
+        std::sync::Mutex<Option<broadcast::Receiver<super::session_manager::SessionLifecycle>>>,
+    >,
     deadline: Instant,
 }
 
 impl ActionTransaction {
     fn mark_dispatch(&self, marker: &ActionDispatchMarker) {
-        for events in [&self.action_events, &self.observation_events] {
+        for events in [
+            &self.action_events,
+            &self.observation_events,
+            &self.target_signal_events,
+        ] {
             let mut events = events.lock().expect("action event stream poisoned");
             if let Some(receiver) = events.as_mut() {
+                *receiver = receiver.resubscribe();
+            }
+        }
+        {
+            let mut lifecycle = self
+                .target_lifecycle
+                .lock()
+                .expect("action target lifecycle stream poisoned");
+            if let Some(receiver) = lifecycle.as_mut() {
                 *receiver = receiver.resubscribe();
             }
         }
@@ -198,6 +215,24 @@ impl ActionTransaction {
             .expect("observation event stream poisoned")
             .take()
             .expect("action did not arm an observation event stream")
+    }
+
+    fn take_target_signal_events(&self) -> broadcast::Receiver<CdpEvent> {
+        self.target_signal_events
+            .lock()
+            .expect("action target signal stream poisoned")
+            .take()
+            .expect("action target signal stream already consumed")
+    }
+
+    fn take_target_lifecycle(
+        &self,
+    ) -> broadcast::Receiver<super::session_manager::SessionLifecycle> {
+        self.target_lifecycle
+            .lock()
+            .expect("action target lifecycle stream poisoned")
+            .take()
+            .expect("action target lifecycle stream already consumed")
     }
 }
 
@@ -736,6 +771,8 @@ impl BrowserCore {
         let id = Uuid::new_v4().to_string();
         let action_events = context.sessions.subscribe_browser_events();
         let observation_events = observe.then(|| context.sessions.subscribe_browser_events());
+        let target_signal_events = context.sessions.subscribe_browser_events();
+        let target_lifecycle = context.sessions.subscribe_lifecycle();
         let frame = context
             .frames
             .iter()
@@ -757,6 +794,8 @@ impl BrowserCore {
             root_frame_id: context.root_frame.id.clone(),
             action_events: Arc::new(std::sync::Mutex::new(Some(action_events))),
             observation_events: Arc::new(std::sync::Mutex::new(observation_events)),
+            target_signal_events: Arc::new(std::sync::Mutex::new(Some(target_signal_events))),
+            target_lifecycle: Arc::new(std::sync::Mutex::new(Some(target_lifecycle))),
             deadline,
         })
     }
@@ -784,6 +823,8 @@ impl BrowserCore {
         let mut observation_events = observation_options
             .is_some()
             .then(|| transaction.take_observation_events());
+        let mut target_signal_events = transaction.take_target_signal_events();
+        let mut target_lifecycle = transaction.take_target_lifecycle();
         let dialog = sessions.dialog_for_target(&target_id).await;
         let dialog_blocking = dialog_opened || dialog.is_some();
         let action_navigation_future = wait_for_action_navigation(
@@ -793,6 +834,14 @@ impl BrowserCore {
             &transaction.root_frame_id,
             &transaction.before_url,
             &mut action_events,
+            deadline,
+        );
+        let target_changes_future = collect_action_target_changes(
+            Arc::clone(&self.owner),
+            client_id,
+            &target_id,
+            &mut target_signal_events,
+            &mut target_lifecycle,
             deadline,
         );
         let capture_future = async {
@@ -854,7 +903,11 @@ impl BrowserCore {
                 None
             }
         };
-        let (_, capture) = tokio::join!(action_navigation_future, capture_future);
+        let (_, target_changes, capture) = tokio::join!(
+            action_navigation_future,
+            target_changes_future,
+            capture_future
+        );
 
         let (observation, observation_outcome) = if let Some(capture) = capture {
             match capture {
@@ -913,6 +966,7 @@ impl BrowserCore {
                 opened: dialog_blocking,
                 dialog,
             },
+            target_changes,
             pending_release: lane.pending_release.is_some(),
             last_stage: observation_outcome.last_stage().to_owned(),
             observation_outcome,
@@ -2622,6 +2676,162 @@ async fn wait_for_action_navigation(
                 return;
             }
             Err(_) => return,
+        }
+    }
+}
+
+/// Correlate finite root-target lifecycle facts with one action without taking
+/// ownership away from SessionManager or BrowserOwner. The ordinary path uses
+/// the same 100ms discovery window as navigation. A synchronous
+/// `Page.windowOpen` signal extends only that action long enough for
+/// SessionManager to publish the ready child target.
+///
+/// Design and cross-framework evidence:
+/// `docs/evidence/20260902__action-target-change-presentation__@codex.md`.
+async fn collect_action_target_changes(
+    owner: Arc<BrowserOwner>,
+    client_id: &str,
+    source_target_id: &str,
+    signal_events: &mut broadcast::Receiver<CdpEvent>,
+    lifecycle: &mut broadcast::Receiver<super::session_manager::SessionLifecycle>,
+    request_deadline: Instant,
+) -> ActionTargetChanges {
+    const DISCOVERY_WINDOW: Duration = Duration::from_millis(100);
+    const QUIET_WINDOW: Duration = Duration::from_millis(100);
+    const MAX_POPUP_WAIT: Duration = Duration::from_secs(2);
+
+    let available = request_deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(ACTION_RESPONSE_RESERVE);
+    if available.is_zero() {
+        return ActionTargetChanges::default();
+    }
+
+    let sessions = owner.sessions();
+    let started = Instant::now();
+    let deadline = started + available.min(MAX_POPUP_WAIT);
+    let discovery_deadline = started + available.min(DISCOVERY_WINDOW);
+    let mut popup_signalled = false;
+    let mut quiet_since: Option<Instant> = None;
+    let mut opened_ids = HashSet::new();
+    let mut pending_opened_ids: HashSet<String> = HashSet::new();
+    let mut closed_ids = HashSet::new();
+    let mut changes = ActionTargetChanges::default();
+
+    loop {
+        let mut newly_ready = Vec::new();
+        for target_id in &pending_opened_ids {
+            if let Ok(target) = sessions.target(target_id).await {
+                if !target.url.is_empty() {
+                    newly_ready.push(target);
+                }
+            }
+        }
+        for target in newly_ready {
+            pending_opened_ids.remove(&target.target_id);
+            if opened_ids.insert(target.target_id.clone()) {
+                owner
+                    .inherit_target_lease(source_target_id, &target.target_id)
+                    .await;
+                changes.opened.push(ActionOpenedTarget {
+                    target_id: target.target_id.clone(),
+                    opener_id: source_target_id.to_owned(),
+                    url: target.url,
+                    title: target.title,
+                    ownership: owner.target_ownership(client_id, &target.target_id).await,
+                });
+                quiet_since = Some(Instant::now());
+            }
+        }
+
+        let now = Instant::now();
+        if !popup_signalled && changes.opened.is_empty() && changes.closed.is_empty() {
+            if now >= discovery_deadline {
+                return changes;
+            }
+        } else if quiet_since
+            .is_some_and(|quiet_start| now.duration_since(quiet_start) >= QUIET_WINDOW)
+        {
+            return changes;
+        }
+        if now >= deadline {
+            for target_id in pending_opened_ids {
+                if let Ok(target) = sessions.target(&target_id).await {
+                    if target.url.is_empty() {
+                        continue;
+                    }
+                    owner
+                        .inherit_target_lease(source_target_id, &target.target_id)
+                        .await;
+                    changes.opened.push(ActionOpenedTarget {
+                        target_id: target.target_id.clone(),
+                        opener_id: source_target_id.to_owned(),
+                        url: target.url,
+                        title: target.title,
+                        ownership: owner.target_ownership(client_id, &target.target_id).await,
+                    });
+                }
+            }
+            return changes;
+        }
+
+        let wake_at = if popup_signalled || !changes.opened.is_empty() || !changes.closed.is_empty()
+        {
+            quiet_since
+                .map(|quiet_start| (quiet_start + QUIET_WINDOW).min(deadline))
+                .unwrap_or_else(|| (now + Duration::from_millis(25)).min(deadline))
+        } else {
+            discovery_deadline.min(deadline)
+        };
+        let remaining = wake_at.saturating_duration_since(now);
+        if remaining.is_zero() {
+            return changes;
+        }
+
+        tokio::select! {
+            event = signal_events.recv() => match event {
+                Ok(event) if event.method == "Page.windowOpen" => {
+                    let belongs_to_source = match event.session_id.as_deref() {
+                        Some(session_id) => sessions
+                            .session_belongs_to_root(session_id, source_target_id)
+                            .await,
+                        None => false,
+                    };
+                    if belongs_to_source {
+                        popup_signalled = true;
+                        quiet_since = None;
+                    }
+                }
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return changes,
+            },
+            event = lifecycle.recv() => match event {
+                Ok(super::session_manager::SessionLifecycle::Attached(target))
+                    if target.target_id == target.root_target_id
+                        && target.opener_id.as_deref() == Some(source_target_id) =>
+                {
+                    pending_opened_ids.insert(target.target_id);
+                    popup_signalled = true;
+                    quiet_since = None;
+                }
+                Ok(super::session_manager::SessionLifecycle::Detached {
+                    root_target_id,
+                    is_root: true,
+                    ..
+                }) if root_target_id == source_target_id
+                    || opened_ids.contains(&root_target_id)
+                    || pending_opened_ids.contains(&root_target_id) =>
+                {
+                    pending_opened_ids.remove(&root_target_id);
+                    if closed_ids.insert(root_target_id.clone()) {
+                        changes.closed.push(ActionClosedTarget { target_id: root_target_id });
+                    }
+                    quiet_since = Some(Instant::now());
+                }
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return changes,
+            },
+            _ = sleep(remaining) => {}
         }
     }
 }

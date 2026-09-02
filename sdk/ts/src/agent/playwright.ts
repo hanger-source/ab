@@ -272,7 +272,8 @@ export class Locator {
       ...options,
       observe: "none",
     });
-    this.#ax.applyActionResult(result.selection);
+    await this.#ax.applyActionResult(result.input);
+    await this.#ax.applyActionResult(result.selection);
     return result;
   }
 
@@ -376,7 +377,7 @@ export class Locator {
       ...options,
       observe: "none",
     });
-    this.#ax.applyActionResult(result);
+    await this.#ax.applyActionResult(result);
     return result;
   }
 }

@@ -1,4 +1,5 @@
 use crate::browser::session_manager::OpenDialog;
+use crate::browser::target_leases::TargetOwnership;
 use crate::error::AbError;
 use crate::observation::ObservationOutput;
 use crate::selector::ElementTarget;
@@ -129,6 +130,33 @@ pub struct DialogOutcome {
     pub dialog: Option<OpenDialog>,
 }
 
+/// Ready root-page targets opened or closed while one action was in flight.
+/// SessionManager remains the lifecycle owner; this is an immutable action
+/// correlation result. See
+/// `docs/evidence/20260902__action-target-change-presentation__@codex.md`.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionTargetChanges {
+    pub opened: Vec<ActionOpenedTarget>,
+    pub closed: Vec<ActionClosedTarget>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionOpenedTarget {
+    pub target_id: String,
+    pub opener_id: String,
+    pub url: String,
+    pub title: String,
+    pub ownership: TargetOwnership,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionClosedTarget {
+    pub target_id: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActionObservationStatus {
@@ -196,6 +224,7 @@ pub struct ActionResult {
     pub navigation: NavigationChange,
     pub document: DocumentChange,
     pub dialog: DialogOutcome,
+    pub target_changes: ActionTargetChanges,
     pub pending_release: bool,
     pub observation_outcome: ActionObservationOutcome,
     pub last_stage: String,

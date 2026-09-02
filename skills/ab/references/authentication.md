@@ -23,7 +23,7 @@ Decide login state from rendered facts such as the account menu, sign-in form, o
 
 If the site shows an ordinary login form, use the same AX/Locator action rules as any other form. Do not request credentials unless the task requires authentication and the persistent profile is not already signed in.
 
-SSO can open a new tab or redirect through several origins. Record the tab list before the action, perform it, list again, and select the new target by id and rendered state rather than by array position.
+SSO can redirect the current page through several origins or open another page in a new tab or separate browser window. When a popup is an expected result, first present `browser.documentation("tabs")` and use `tab.expectPopup(action)` so absence is a real timeout. When an ordinary action unexpectedly opens another page, use its `targetChanges.opened` entry or the presented `AB_BROWSER_CHANGE`, then bind that exact `targetId` with `browser.tabs.get()`. Do not infer the result from before/after tab-list counts or array position. If the current page redirects instead, wait for the required URL or rendered fact there. In every form, verify the selected page from fresh rendered state before continuing.
 
 If a flow requires a hardware key, biometric approval, mobile confirmation, CAPTCHA, or an action outside browser control, leave the browser at that step and tell the user exactly what is waiting. Do not attempt to defeat or outsource the challenge.
 

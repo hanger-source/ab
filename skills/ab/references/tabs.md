@@ -57,7 +57,19 @@ createdByTask.add(created.id);
 
 The tab initially selected by a user, coordinator, or benchmark is the task entry point, not necessarily the only task tab. If an authorized click opens a product editor, authentication flow, detail view, or other child tab needed by that task, the new target inherits task ownership. Continue the workflow there after verifying its id and rendered identity. A generic instruction to operate the named starting tab does not forbid these task-created descendants unless the caller explicitly says the workflow must remain in one target.
 
-If an operation is expected to open a popup, arm the opener-scoped watcher before the trigger:
+Every mutation returns `ActionResult.targetChanges`. A SessionManager-published child opened by that action appears in `opened` with its exact `targetId`, `openerId`, URL/title metadata, and ownership; a root target closed during the action appears in `closed`. Agent mode presents non-empty changes as `AB_BROWSER_CHANGE`, so an Agent need not predict every popup or poll `tabs.list()`. Publication means the root CDP session is initialized and addressable, not that page load or application rendering has settled. The notice does not switch tabs: resolve the reported id explicitly, wait for the required lifecycle fact, and observe it before continuing.
+
+```js
+const result = await tab.playwright.getByRole("button", { name: "Sign in" }).click();
+const opened = result.targetChanges.opened[0];
+if (opened) {
+  const child = await browser.tabs.get(opened.targetId);
+  await child.playwright.waitForLoadState("domcontentloaded");
+  await child.ax.write("state");
+}
+```
+
+If an operation is expected to open a popup and the workflow must fail when it does not, arm the opener-scoped watcher before the trigger:
 
 ```js
 await browser.documentation("tabs");
@@ -68,7 +80,7 @@ const child = await tab.expectPopup(
 createdByTask.add(child.id);
 ```
 
-`expectPopup()` subscribes before the action, waits for a ready root page whose exact `openerId` is this tab, and returns that child with the opener's lease already inherited. It does not pick the last, active, or same-origin tab. Inspect its URL/title and fresh AX state before continuing.
+`expectPopup()` subscribes before the action, waits for a published root page whose exact `openerId` is this tab, and returns that child with the opener's lease already inherited. It is the deterministic expectation API, whereas `targetChanges` is ordinary action discovery. Neither path picks the last, active, or same-origin tab. Wait for the required page lifecycle fact, then inspect the child's URL/title and fresh AX state before continuing.
 
 The same successfully presented tabs topic unlocks the lower-level Agent resource. Use `const watcher = await tab.resources.popups()` before the action, then `await watcher.waitForPopup()` and dispose it. Do not replace either form with a fixed sleep and before/after tab-list diff; a fast or not-yet-ready target can be missed.
 

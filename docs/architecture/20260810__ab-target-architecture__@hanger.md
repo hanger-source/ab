@@ -373,7 +373,9 @@ Rust 在同一 tab operation 内固定 target、frame topology、document genera
 
 ### 6.9 Popup expectation
 
-popup 是 target lifecycle 事实，不由 click 或下一份 AX observation 猜测。Core `tab.watchPopups()` 在 SessionManager 的 ready-root lifecycle 上创建 opener-scoped Resource；Agent facade 用 `tab.expectPopup(action)` 固定“先订阅、再动作、再等待准确 child”的顺序。返回的 child 保持真实 target id、opener id 和继承的 client mutation lease。超时不选择 last/active/same-origin tab。
+popup target 是 SessionManager 的 target lifecycle 事实，不由 AX observation、tab 顺序或 URL 猜测。ActionTransaction 在输入前取得短生命周期游标，把动作期间已完成 root session 初始化的 target 打开/关闭作为不可变 `ActionResult.targetChanges` 返回；BrowserOwner 在结果发布前保持准确的 opener lease 继承。target publication 只表示可寻址，不承诺页面 load 或 application readiness。Agent Presenter 只在集合非空时展示 `AB_BROWSER_CHANGE`，不缓存 lifecycle，也不自动切换 target。
+
+Core `tab.watchPopups()` 仍在 SessionManager 的 ready-root lifecycle 上创建 opener-scoped Resource；Agent facade 用 `tab.expectPopup(action)` 固定“先订阅、再动作、再等待准确 child”的顺序。它用于调用方已经要求 popup 必须发生的确定性 expectation。返回的 child 保持真实 target id、opener id 和继承的 client mutation lease。超时不选择 last/active/same-origin tab。
 
 这项设计综合 Codex Browser 的显式 Tab/Locator 操作面、Playwright/Puppeteer 的 pre-armed event expectation、agent-browser 的严格 tab binding 与 browser-harness/OpenChrome 的共享浏览器 target 隔离。具体采纳、拒绝和真实对照见 `docs/evidence/20260902__client-target-ownership-and-popup-expectation__@codex.md`。
 

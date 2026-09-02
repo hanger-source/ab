@@ -68,6 +68,11 @@ try {
     "an action without a post-action observation must not wait for application route data",
   );
   assert.equal(actionOnly.observation, null);
+  assert.deepEqual(
+    actionOnly.targetChanges,
+    { opened: [], closed: [] },
+    "an ordinary same-target SPA action must not report browser target lifecycle changes",
+  );
   await actionOnlyTab.waitForURL("/destination", { timeoutMs: 2_000 });
   assert.equal(new URL((await browser.tabs.get(actionOnlyTab.id)).url).pathname, "/destination");
 

@@ -330,8 +330,21 @@ export class AX {
   }
 
   /** @internal */
-  applyActionResult(result: ActionResult): void {
+  async applyActionResult(result: ActionResult): Promise<void> {
     this.#tab.applyActionResult(result);
+    if (result.targetChanges.opened.length === 0 && result.targetChanges.closed.length === 0) return;
+    await this.#presenter.presentText({
+      kind: "action",
+      origin: result.navigation.afterUrl,
+      observationId: null,
+      text: `AB_BROWSER_CHANGE ${JSON.stringify({
+        actionId: result.id,
+        sourceTargetId: result.target.targetId,
+        opened: result.targetChanges.opened,
+        closed: result.targetChanges.closed,
+      })}`,
+      untrusted: true,
+    });
   }
 
   /** @internal */
@@ -378,7 +391,7 @@ export class AX {
     action: (ref: AXRef) => Promise<ActionResult<TData>>,
   ): Promise<ActionResult<TData>> {
     const result = await action(this.#ref(refId));
-    this.applyActionResult(result);
+    await this.applyActionResult(result);
     return result;
   }
 

@@ -13,8 +13,9 @@ use std::sync::{
 mod model;
 
 pub use model::{
-    dispatch_mechanism, ActionCoordinateIdentity, ActionObservationOutcome, ActionResult,
-    ActionTargetIdentity, ActionTiming, DialogOutcome, DocumentChange, NavigationChange,
+    dispatch_mechanism, ActionClosedTarget, ActionCoordinateIdentity, ActionObservationOutcome,
+    ActionOpenedTarget, ActionResult, ActionTargetChanges, ActionTargetIdentity, ActionTiming,
+    DialogOutcome, DocumentChange, NavigationChange,
 };
 
 #[derive(Clone, Default)]

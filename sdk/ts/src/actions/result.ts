@@ -55,6 +55,24 @@ export type ActionDialog = {
   };
 };
 
+/** Ready root-page targets opened or closed while this action was in flight. */
+export type ActionTargetChanges = {
+  opened: ActionOpenedTarget[];
+  closed: ActionClosedTarget[];
+};
+
+export type ActionOpenedTarget = {
+  targetId: string;
+  openerId: string;
+  url: string;
+  title: string;
+  ownership: "available" | "owned" | "other";
+};
+
+export type ActionClosedTarget = {
+  targetId: string;
+};
+
 export type ActionObservationOutcome = {
   status: "notRequested" | "completed" | "skippedDialog" | "failed";
   error?: {
@@ -90,6 +108,7 @@ export type ActionResult<TData = unknown> = {
   navigation: NavigationChange;
   document: DocumentChange;
   dialog: ActionDialog;
+  targetChanges: ActionTargetChanges;
   pendingRelease: boolean;
   observationOutcome: ActionObservationOutcome;
   lastStage: string;

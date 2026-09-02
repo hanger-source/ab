@@ -60,7 +60,7 @@ export class CUA {
       ...options,
       observe: "none",
     });
-    this.#ax.applyActionResult(result);
+    await this.#ax.applyActionResult(result);
     return result;
   }
 }

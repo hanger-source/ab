@@ -76,6 +76,15 @@ impl BrowserOwner {
         self.target_leases.ownership(client_id, target_id).await
     }
 
+    /// Resolve child mutation authority at the BrowserOwner boundary before an
+    /// action reports SessionManager lifecycle facts to a client. The action
+    /// observes this result; it does not become a second lease owner.
+    /// Design evidence:
+    /// `docs/evidence/20260902__action-target-change-presentation__@codex.md`.
+    pub async fn inherit_target_lease(&self, opener_id: &str, target_id: &str) {
+        self.target_leases.inherit(opener_id, target_id).await;
+    }
+
     pub async fn cleanup_client(&self, client_id: &str) {
         self.target_leases.release_client(client_id).await;
     }

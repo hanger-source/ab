@@ -66,14 +66,16 @@ let tab = candidate
 
 Track tabs created for the task. Acquiring an existing tab grants mutation authority while this client is connected; it does not make the tab disposable user content. Close only task-created tabs or tabs the user explicitly asked to close. `browser.disconnect()` releases this client's target leases, observations, and event resources; it does not close tabs, Chrome, or the daemon.
 
-A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits the opener's target lease. Before the first popup operation, present the tabs topic, then arm target observation before the action:
+A task's starting tab is an entry point, not an exclusive target. A popup or link-opened tab created by an authorized task action inherits the opener's target lease. Ordinary Agent actions automatically present an `AB_BROWSER_CHANGE` notice when they open or close a SessionManager-published root-page target; use the reported `targetId` with `browser.tabs.get()`, wait for the specific load fact when required, and then verify that child's rendered identity. Target publication does not imply page load or application readiness. This is discovery, not an automatic tab switch.
+
+When the task already requires a popup and its absence must fail the operation, present the tabs topic and arm the exact opener-scoped expectation before the action:
 
 ```ts
 await browser.documentation("tabs");
 const child = await tab.expectPopup(() => action());
 ```
 
-`expectPopup()` returns the exact ready child. Do not use sleep plus `tabs.list()` diff, assume the child is last/active, or touch unrelated pre-existing tabs.
+`expectPopup()` returns the exact ready child. It remains the deterministic expectation API; the automatic action notice covers previously unknown target changes. Do not use sleep plus `tabs.list()` diff, assume the child is last/active, or touch unrelated pre-existing tabs.
 
 Read [browser and task lifecycle](references/lifecycle.md) when reusing tabs, recovering from an interrupted JavaScript kernel, or coordinating more than one task. Read [authentication](references/authentication.md) before handling login, SSO, CAPTCHA, or Chrome-owned authentication UI.
 
@@ -131,7 +133,7 @@ Prefer role, label, text, placeholder, alt text, title, or test id over CSS. Use
 
 Locator text and accessible-name arguments are literal strings in the current public API. Do not pass JavaScript `RegExp` objects or Playwright-style regex name filters; use an observed exact string, a literal substring with `exact: false`, or compose/filter Locators.
 
-In `@hanger-source/ab/agent`, these builders return `Locator`. Mutations dispatch once and return action-owned target, mechanism, navigation, document, dialog, timing, and settled input facts; they do not capture or present AX state. Agent action options do not accept `write`, `observe`, `baseline`, or `observation`. `Locator.waitFor()` is also a pure wait. Use `tab.playwright.waitForURL()`, `waitForLoadState()`, page/Locator `waitFor()`, or a pre-armed Resource for the specific postcondition, then call `tab.ax.write("diff" | "state")` only when the next decision needs model-visible page state. Core `@hanger-source/ab` retains explicit `observe` transactions for programmatic callers and never presents content.
+In `@hanger-source/ab/agent`, these builders return `Locator`. Mutations dispatch once and return action-owned target, mechanism, navigation, document, dialog, published root-target changes, timing, and settled input facts; they do not capture or present AX state. Non-empty target changes are presented automatically as `AB_BROWSER_CHANGE`, but AB never switches the selected tab. Agent action options do not accept `write`, `observe`, `baseline`, or `observation`. `Locator.waitFor()` is also a pure wait. Use `tab.playwright.waitForURL()`, `waitForLoadState()`, page/Locator `waitFor()`, or a pre-armed Resource for the specific postcondition, then call `tab.ax.write("diff" | "state")` only when the next decision needs model-visible page state. Core `@hanger-source/ab` retains explicit `observe` transactions for programmatic callers and never presents content.
 
 Use `locator.elementHandle()` or `ref.elementHandle()` only when several operations must stay bound to the same actual node. Element handles do not rerun a Locator after navigation and must be disposed.
 

@@ -174,7 +174,8 @@ export class Locator {
             ...options,
             observe: "none",
         });
-        this.#ax.applyActionResult(result.selection);
+        await this.#ax.applyActionResult(result.input);
+        await this.#ax.applyActionResult(result.selection);
         return result;
     }
     press(key, options = {}) {
@@ -242,7 +243,7 @@ export class Locator {
             ...options,
             observe: "none",
         });
-        this.#ax.applyActionResult(result);
+        await this.#ax.applyActionResult(result);
         return result;
     }
 }

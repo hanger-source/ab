@@ -25,6 +25,8 @@ does not preserve any account, site URL, label, or business workflow.
   browser-level auto-attach pauses that target at startup.
 - The source action requests no post-action observation; child initialization
   proceeds independently through SessionManager.
+- The action returns the ready child as a finite target lifecycle fact, and the
+  Agent Presenter announces it without a tab-list poll or implicit tab switch.
 
 ## Invariants
 
@@ -36,8 +38,13 @@ does not preserve any account, site URL, label, or business workflow.
   is covered separately by the explicit watcher resource scenario.
 - The application receives exactly one trusted activation; the runtime never
   replays the click to manufacture success.
-- The child target is published only after it has a navigated URL and readable
-  AX heading.
+- The child target is published after root-session initialization with a
+  navigated URL. The caller then explicitly waits for page load before reading
+  its AX heading; target publication does not impersonate document readiness.
+- `ActionResult.targetChanges.opened` identifies that exact child, its opener,
+  and inherited ownership; the Agent can bind it directly by target id.
+- A trusted action inside the child closes that root target; the returned
+  `targetChanges.closed` and Agent notice identify the same target id.
 - The profile endpoint is requested exactly once.
 
 The five-second deadline is a regression boundary for a deterministic

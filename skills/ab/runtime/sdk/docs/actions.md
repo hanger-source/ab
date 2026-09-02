@@ -35,7 +35,8 @@ Agent actions dispatch input and return action-owned facts. They do not capture 
 
 - use `tab.playwright.waitForURL()` or `waitForLoadState()` for browser lifecycle facts;
 - use a Locator `waitFor()` or page-level `waitFor()` for a rendered element/text condition;
-- prepare a Resource before the action for popup, download, file chooser, dialog, network, or console events that can be missed;
+- inspect `result.targetChanges` for root-page targets opened or closed during the action; Agent mode presents non-empty changes automatically without switching tabs;
+- prepare a Resource before the action when popup absence must fail, or for download, file chooser, dialog, network, or console events whose full lifecycle can be missed;
 - use `tab.ax.write("diff")` when the next decision needs the semantic change since the last presented state, or `write("state")` when it needs complete current context.
 
 `write("diff")` performs a new explicit observation against the last successfully presented state and inherits that state's exact capture shape. It is not part of the preceding mutation. A different mode, surface, frame scope, depth, character budget, or URL policy does not form a meaningful diff and is rejected. A timeout before input dispatch is retryable; a cancellation or transport loss after dispatch can return `outcome_unknown`, which must be inspected before any retry.
@@ -58,10 +59,13 @@ result.timing             // start, end, duration
 result.navigation         // before/after URL and whether it changed
 result.document           // before/after document generation and whether it changed
 result.dialog             // pre-armed dialog fact and identity
+result.targetChanges      // published root-page targets opened or closed during this action
 result.observationOutcome // completed, skippedDialog, failed, or notRequested
 result.lastStage
 result.observation        // AXState when observe:"diff" or observe:"state" completed safely
 ```
+
+`targetChanges.opened` carries immutable target id, exact opener id, URL/title metadata, and ownership after BrowserOwner has applied child-lease inheritance. `targetChanges.closed` carries exact root target ids. SessionManager remains the lifecycle owner; ActionTransaction only correlates these finite facts with the action. Agent presentation emits `AB_BROWSER_CHANGE` when either collection is non-empty, but never adopts the child as an implicit current tab. Target publication means its root CDP session is initialized and addressable; it does not imply the page `load` event or a stable application document. Resolve the child, wait for the exact lifecycle fact needed, then observe it.
 
 `ActionResult` proves which browser mechanism ran and what browser facts were observed around it. It never proves that a save, purchase, deletion, login, or other business outcome succeeded. Verify that outcome from the rendered application state or an explicitly prepared resource.
 

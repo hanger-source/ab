@@ -231,8 +231,22 @@ export class AX {
         return this.#ownedStates.size;
     }
     /** @internal */
-    applyActionResult(result) {
+    async applyActionResult(result) {
         this.#tab.applyActionResult(result);
+        if (result.targetChanges.opened.length === 0 && result.targetChanges.closed.length === 0)
+            return;
+        await this.#presenter.presentText({
+            kind: "action",
+            origin: result.navigation.afterUrl,
+            observationId: null,
+            text: `AB_BROWSER_CHANGE ${JSON.stringify({
+                actionId: result.id,
+                sourceTargetId: result.target.targetId,
+                opened: result.targetChanges.opened,
+                closed: result.targetChanges.closed,
+            })}`,
+            untrusted: true,
+        });
     }
     /** @internal */
     async presentTextInputOutcome(result) {
@@ -274,7 +288,7 @@ export class AX {
     }
     async #perform(refId, action) {
         const result = await action(this.#ref(refId));
-        this.applyActionResult(result);
+        await this.applyActionResult(result);
         return result;
     }
     async #presentState(state) {
