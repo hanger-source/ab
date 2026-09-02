@@ -4,7 +4,7 @@ description: "Control AB's persistent headed Chrome through the version-matched 
 license: Apache-2.0
 metadata:
   author: hanger
-  version: "0.3.0-alpha.4"
+  version: "0.3.0-rc.1"
   repository: https://github.com/hanger-source/ab
   compatibility: macOS arm64, Node.js 20 or later, and Google Chrome
 ---

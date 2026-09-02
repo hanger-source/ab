@@ -1,6 +1,6 @@
 {
   "name": "@hanger-source/ab-runtime-darwin-arm64",
-  "version": "0.3.0-alpha.4",
+  "version": "0.3.0-rc.1",
   "description": "AB native Rust browser runtime for macOS arm64",
   "author": "hanger",
   "repository": {
