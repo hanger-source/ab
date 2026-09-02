@@ -112,7 +112,9 @@ async function runTask(
   assert(observation.screenshot, `${taskId}: missing screenshot`);
   const state = observation.state;
   const screenshot = observation.screenshot;
-  assert(state.text.includes(JSON.stringify(instruction)), `${instruction}\n${state.text}`);
+  // BrowserGym-equivalent episode setup deliberately removes the human query
+  // before Agent handoff. The coordinator owns `instruction`; AX owns only the
+  // rendered operation surface. See `test/benchmarks/README.md`.
   assert(
     screenshot.viewportId.includes(state.documentGeneration),
     `${taskId}: AX and screenshot do not share a document transaction`,

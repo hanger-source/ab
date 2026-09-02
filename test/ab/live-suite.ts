@@ -92,7 +92,7 @@ const cases: LiveCase[] = [
     name: "dialog",
     file: "dialog-lifecycle-live.ts",
     timeoutMs: 15_000,
-    default: false,
+    default: true,
     headless: false,
   },
   {

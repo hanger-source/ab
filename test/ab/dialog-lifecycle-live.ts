@@ -60,7 +60,7 @@ try {
   const secondPromise = dialogs.waitForDialog();
   await tab.getByText("Open dialog", { exact: true }).click({ observe: "none" });
   const second = await secondPromise;
-  await assert.rejects(first.accept(), (error: unknown) => {
+  await assert.rejects(async () => first.accept(), (error: unknown) => {
     assert(error instanceof ABError);
     assert.equal(error.kind, "stale_dialog");
     return true;

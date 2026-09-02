@@ -69,7 +69,11 @@ AB 采用的是 Agent browser 语义，而不是通用 Playwright 的无界 Page
 
 为了避免单次默认套件掩盖竞态，本轮把 active surface overlay、动画消退、SPA navigation、layout shift、background popup、paused popup 初始化、Resource cancellation 和跨 tab scheduler 串成重复压力。第一轮 8/8 通过；第二轮前五项通过后，既有 paused-popup 场景出现一次 source `observationOutcome.status="failed"`。同一场景随后独立 10/10 通过。这个结果保留为负载下的 observation 竞态嫌疑，不用延长 deadline 或放宽断言把它写成稳定通过，也不把它归因给已经稳定完成 trusted input 的 BrowserOwner。
 
-非默认 dialog 场景也没有闭环：click 与 watcher 都成功，但收到的 `DialogHandle` 在 `accept()` 前已被 SDK 标成 closed，返回 `stale_dialog`。官方 MiniWoB 机械 regression 则在动作前失败：coordinator 已按 BrowserGym 语义移除 human instruction，旧测试却仍断言 AX 正文必须包含 instruction；该静态矛盾自测试首次提交就存在，不能算 AB action 失败或通过。本批不借这两个邻接红灯扩大生产改动。
+后续在同一 HEAD 上再次执行两轮六场景混合压力，12/12 通过；随后包含 popup、overlay、SPA、Resource、scheduler、Skill client 和 dialog 的默认 real-Chrome suite 为 22/22。此前单次失败没有保留下能指向 stage、session 或 document identity 的原始错误，此后合计 22 次 paused-popup 独立或混合执行均未复现。因此它保留为历史负载嫌疑，不再写成一个已经定位但尚未修复的产品缺陷；没有据此增加 timeout、重试或 popup 分支。
+
+非默认 dialog 场景最初被误判为产品红灯。带行号复现证明第一次 `accept()`、close event、页面结果与第二次 dialog 创建均已成功；真正失败的是测试把同步抛出 `stale_dialog` 的 `first.accept()` 先求值，再把结果传给 `assert.rejects`，导致断言无法接住预期错误。改为异步 thunk 后，同一正式生产链完成 accept、旧 handle stale 校验、第二个 dialog dismiss 和页面结果验证。这里没有修改 Dialog 生产逻辑；该场景随后进入默认 suite。
+
+官方 MiniWoB 机械 regression 也先暴露测试合同错误：coordinator 已按 BrowserGym 语义移除 human instruction，旧测试却仍断言 AX 正文必须包含 instruction。删除这条矛盾断言后，正式页面继续运行并暴露真正的 SDK 缺陷：`fillAndSelectSuggestion()` 内部固定以 `interactive` shape 创建 suggestion ref，最终 selection 却按调用者显式 `full` shape 请求 diff，Rust 正确返回 `observation_shape_mismatch`。修复没有放宽 Rust identity 检查，而是让组合动作从第一份 baseline 开始保持调用者的显式 capture shape；无显式 shape 时仍使用内部 `interactive/document` shape。复验中官方 `click-test` 与 `enter-text` 均得到页面 `rawReward=1`，`book-flight-nodelay` 的 jQuery UI autocomplete 将 `Anvik, AK` 提交为 `Anvik, AK (ANV)`，HAR 20 entries、`complete:true`。
 
 官方 WebArena-Verified Hard 610 提供了另一条实际反例。创建帖子时，短 ref `click(..., { write: "state" })` 已真实提交并导航到新帖子，但 Core 没有返回可展示 observation；Agent AX facade 随后隐式调用独立 `observation.snapshot`，新请求耗尽约 30 秒才报 `request.deadline`。只读核对确认帖子已创建，未重放 mutation；评论使用 `write:"none"` 后显式观察，2.1 秒完成，官方 evaluator 对发帖和评论两个 POST 给出 score 1.0，HAR 83 entries、`complete:true`。
 
@@ -77,7 +81,7 @@ AB 采用的是 Agent browser 语义，而不是通用 Playwright 的无界 Page
 
 同一修复后的自包含 Skill 在再次重建的官方 Reddit 环境中原样执行 610。创建动作遇到站点响应延迟，Core 在 20 秒 request deadline 内返回 `observationOutcome.status="failed"` 与 `action.observation.deadline`；Agent 调用于 20.4 秒返回，没有后续独立 snapshot。只读观察看到浏览器已经进入新帖 URL、站点暂时呈现 nginx 504；重载同一 URL 后帖子存在，因此没有重放创建。评论动作的 `write:"state"` 在 4.872 秒内连同新 observation 返回。官方 evaluator 再次为 1.0，HAR 85 entries、`complete:true`、无 body/attachment failure。结果位于 `/tmp/ab-webarena-agent-observation-owner-20260902/610/`；`eval_result.json` SHA-256 为 `7b1586f012e58d903fb0bdbfbb4cbc20e4a475afa7619029c9f611401c1e81b4`，`network.har` 为 `1e9fe2ec6555f4291d28a830c7bb6be8a9557d354071ed9e0f1d57855ed8e123`。
 
-更新后的 SDK 和 self-contained Skill 又完整执行默认 live suite，21/21 case 通过。最终 `f853130ced277e95` 一致产物再聚焦执行 background popup、paused popup、Resource cancellation、scheduler concurrency 与 isolated Skill client，5/5 通过。两轮重新覆盖 AXRef、Locator、CUA、OOPIF、Resources、cancellation、跨 tab scheduler、两种 popup 场景和 Skill client；日志中 request-cancellation 场景内部保留的失败状态是预期观测事实，不是 suite case 失败。它证明统一 presentation owner 没有改变底层 action 或 resource 结果，但不抹去上面独立记录的 dialog 红灯和混合压力下单次 popup observation 失败。
+更新后的 SDK 和 self-contained Skill 又完整执行默认 live suite，21/21 case 通过。最终 `f853130ced277e95` 一致产物再聚焦执行 background popup、paused popup、Resource cancellation、scheduler concurrency 与 isolated Skill client，5/5 通过。两轮重新覆盖 AXRef、Locator、CUA、OOPIF、Resources、cancellation、跨 tab scheduler、两种 popup 场景和 Skill client；日志中 request-cancellation 场景内部保留的失败状态是预期观测事实，不是 suite case 失败。它证明统一 presentation owner 没有改变底层 action 或 resource 结果。后续复验又把 dialog 加入默认 suite，完整结果为 22/22；popup observation 取得额外 12/12 混合压力和 22 次累计无复现证据，MiniWoB 官方机械回归也在修正 capture-shape ownership 后通过。
 
 ### WebArena-Verified Hard 771
 

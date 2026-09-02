@@ -149,8 +149,15 @@ export class Locator {
             };
         };
         const ax = new AX(this.#client, this.#tabId);
-        const surface = actionOptions.observation?.surface ?? "document";
-        const baseline = await ax.snapshot({ mode: "interactive", surface, ...remainingOptions() });
+        // The exact suggestion ref becomes the baseline of the final diff action.
+        // Preserve the caller's explicit capture shape from the first snapshot so
+        // Rust never has to weaken its shape-identity check. See
+        // `docs/evidence/20260902__action-resource-ownership__@codex.md`.
+        const captureShape = actionOptions.observation ?? {
+            mode: "interactive",
+            surface: "document",
+        };
+        const baseline = await ax.snapshot({ ...captureShape, ...remainingOptions() });
         let suggestionState = null;
         try {
             const input = await this.fill(query, { ...remainingOptions(), observe: "none" });
@@ -166,8 +173,7 @@ export class Locator {
             let suggestion = null;
             while (!suggestion) {
                 const state = await ax.snapshot({
-                    mode: "interactive",
-                    surface,
+                    ...captureShape,
                     diffFrom: baseline,
                     ...remainingOptions(),
                 });
