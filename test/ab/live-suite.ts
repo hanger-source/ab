@@ -80,6 +80,7 @@ const cases: LiveCase[] = [
     name: "scenario-client-target-ownership",
     file: "scenarios/client-target-ownership/live.mjs",
     default: true,
+    isolatedSkillProduct: true,
   },
   {
     name: "scenario-icon-font-accessible-name",
