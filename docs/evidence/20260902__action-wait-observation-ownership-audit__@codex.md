@@ -72,8 +72,8 @@ Core SDK 的显式 `observe` 暂时保留。它是库调用者主动选择的 ac
 | Stagehand | Page/Locator 是确定性 RPC；`act()` 是另一个模型驱动入口 | Page wait 独立 | `observe()`、`extract()` 独立于普通 click | AI 高层能力可以组合底层动作，不应污染确定性 SDK 合同 |
 | browser-harness | helper 执行 raw CDP action | `wait_for_load/element/network_idle` 显式调用 | recorder/宿主可在 helper 后自动记录或观察 | 自动观察属于宿主策略，不属于 action primitive |
 
-- Codex Browser 的可见 API 把 `click()`、`expectNavigation()`、`waitForURL()`、`waitForLoadState()`、DOM/AX observation 分开；Skill 要求动作后选择足以回答下一问题的最便宜状态，不盲目重试。
-- agent-browser 的标准循环是 snapshot、action、fresh snapshot；wait URL/load/text 是独立命令。它的 Rust vertical slice 也只要求 ref validation、hit-test、CDP input 和明确动作结果。
+- Codex Browser 的可见 API 把 `click()`、`expectNavigation()`、`waitForURL()`、`waitForLoadState()`、DOM/AX observation 分开；Skill 要求动作后选择足以回答下一问题的最便宜状态，不盲目重试。它的 `ax.write()` 仍是独立观察调用，但会在合适时默认展示相对上次 AX state 的 diff；调用者用 `{ disableDiffing: true }` 强制完整树，而不是选择公开的 `"diff"` mode。
+- agent-browser 的标准循环是 snapshot、action、fresh snapshot；wait URL/load/text 是独立命令。它另外提供显式 `diff snapshot`，由调用者要求相对上一份 snapshot 的差异。它的 Rust vertical slice 也只要求 ref validation、hit-test、CDP input 和明确动作结果。
 - Playwright 的普通 click 负责 actionability、输入以及由本次输入直接触发的顶层 navigation signal barrier；`waitForURL()`、`waitForLoadState()` 和 event waiter 仍是独立 Page/Frame 能力。它不把任意 SPA 业务完成压成统一 action settle。
 - Puppeteer 的 `ElementHandle.click()` 只做 scroll、clickable point 和 mouse input；navigation、popup、file chooser 都要求调用方先建立 waiter，再与 click 并发，说明 race-free expectation 与普通 input dispatch 是可组合的两个责任。
 - Stagehand 把确定性 Page/Locator action、页面 wait 与模型驱动的 `act/observe/extract` 分成独立 RPC；它没有让普通 `Page.click()` 自动执行 `observe()`。
@@ -81,6 +81,14 @@ Core SDK 的显式 `observe` 暂时保留。它是库调用者主动选择的 ac
 - browser-harness 的 recorder 会在 helper 成功后自动 observe，但它的生产 helpers 本身仍是 raw CDP action 与显式 `wait_for_load/element/network_idle`。这种“宿主循环自动观察”是 Agent UX 策略，不证明 action RPC 应拥有 observation。
 
 AB 不复制这些框架的对象或内部实现。共同机制只用于验证一个产品判断：可靠 action 可以有严格、复杂的 pre-dispatch/action-owned 语义，但通用业务 postcondition 必须由调用者显式选择。
+
+### Alpha.3 发布前复审
+
+Git 历史表明，`waitForURL()` 与 `waitForLoadState()` 的 SDK 方法都首次进入 `0cea324`；`65213db` 计划曾明确把它们延后为“根据真实缺口单独设计”，而不是已经实现后又撤销。Action 默认 observation 退出后，调用者需要能表达 URL 与当前 document lifecycle 这两个机械后置事实，这个前提此时才成立。二者因此属于被推迟后补齐的成熟 Page primitive，不是围绕某个站点反复换名。当前实现也不把动作后的轮询冒充 race-free `expectNavigation(action)`；需要预先装配的事件期待仍未进入 Alpha.3。
+
+`ax.write("diff")` 同样首次进入 `0cea324`，但它替代的是 action option `click({ write: "diff" })` 所承担的错误 owner，不是把同一实现换个入口。成熟实现对 observation 的调用边界有共识，对 diff 的选择策略没有统一接口：Codex Browser 在独立 `ax.write()` 内自动选择，agent-browser 让调用者显式执行 `diff snapshot`。AB 保留显式 mode，因为 `write()` 不只向模型输出文本，还返回带 observation identity、完整 ref map、capture shape 和 lease 的 typed `AXState`；调用点应明确自己取得的是完整正文还是差异正文。这个选择对齐 Codex 的 action/observation 分离，对齐 agent-browser 的显式 diff，同时明确不声称复刻 Codex 的自动 diff 策略。
+
+复审发现并修正了一个真实合同漏洞：`write("diff", { maxChars })` 曾被宽泛 overload 接受、再由运行时拒绝。公开 overload 现在只让 `"state" | "screenshot" | "both"` 接受 capture-shape options，`"diff"` 在编译期和运行时都只接受 deadline/cancellation；同一句误用已从“TypeScript 通过、运行时报错”变为 TS2769。`page-wait-boundaries` 场景则用服务器扣住 parser-blocking script，证明 `navigate(waitUntil: "none")` 与 URL 已完成时 `DOMContentLoaded` 仍可保持 pending，只有资源释放后 `waitForLoadState("domcontentloaded")` 才完成。它验证的是浏览器生命周期合同，不包含站点 label、业务状态、任意 sleep 或专用 helper。
 
 ### 同页 Codex Browser 实际对照
 
@@ -144,35 +152,16 @@ Core 的保留不是兼容承诺，也不允许 Agent facade 继续默认使用�
 7. strict violation 的候选诊断进入普通错误文本，同时继续保留结构化 `details`，让任意 Node REPL/MCP host 都能看到诊断而不依赖私有 response writer。
 8. `ax.write("diff")` 只接受 operation deadline/cancellation，并机械继承 baseline capture shape；若调用者需要不同 observation contract，就显式建立新的 full state。
 
-## 验证基线与本轮证据
+## 为什么这些证据可以支持改动
 
-本次变化必须同时面对：
+测试总数和绿色退出码只说明某次命令完成，不能证明 API owner 合理。本次判断依赖的是能够排除相反实现的独立事实：
 
-- 默认真实 Chrome live suite，覆盖 AXRef、Locator、CUA、OOPIF、Resource、cancellation、popup 和跨 tab scheduler；
-- MiniWoB++ `click-test`、`enter-text`、`book-flight` 等已通过基础交互；
-- `async-spa-navigation` 的无 observation 路径，证明 action 不等待应用 Fetch；
-- `animated-surface-dismissal` 与 action observation 场景，证明 Core 显式组合能力没有被误伤；
-- WebArena-Verified Hard 已记录六题基线，至少先做相同 candidate/source-aware 聚焦回归，再决定是否形成新的 fresh Skill-only 统计；
-- 一个与修复实现独立的 Agent 实操对照，观察调用次数、盲等、重复 action、外层 kernel deadline 和最终任务结果，而不只看测试退出码。
+- `async-spa-navigation` 让真实 pointer action 启动一个延迟 Fetch，只有响应回来后才 `pushState`。无 observation 的 action 在响应发出前返回，随后 `waitForURL()` 才观察到目标 URL。若 action 仍暗中等待应用 settle，这个边界会直接失败；因此它能支持“action 不拥有业务后置条件”和“URL 属于独立 wait”，而不是只支持某个站点。
+- `page-wait-boundaries` 让新 document 的 parser-blocking script 保持未响应。`navigate(waitUntil: "none")` 返回且 `waitForURL()` 已命中时，`waitForLoadState("domcontentloaded")` 必须仍然 pending；释放脚本后同一个 wait 才完成。这个事实把 URL、当前 document lifecycle 和应用 readiness 分开，也能揭穿一个只检查 URL、固定 sleep 或无条件成功的伪实现。
+- `large-document-local-mutation` 在被截断的大 AX 文档中保留一个靠后的稳定节点，并只插入局部内容。Action 不得替换展示 baseline；显式 `ax.write("diff")` 必须继承同一 capture shape、保留稳定节点 ref、给新节点非冲突 ref，并把模型输出限制为实际局部变化。若 diff 隐式切换 mode/surface/budget，或重新编号整棵树，这些事实都会失败。
+- TypeScript 反例 `ax.write("diff", { maxChars: 8000 })` 曾因宽泛 overload 通过编译、再被运行时拒绝。收窄 overload 后同一句在编译期失败，而合法 diff 和完整 state 调用保持原类型。这个反例直接证明修的是公开合同不一致，不是为了增加类型测试数量。
+- 同页 Codex Browser 对照证明它将 action、navigation expectation 和下一次 observation 分成可见调用；当前正式文档又证明它在独立 `ax.write()` 内自动选择 diff。agent-browser 则提供显式 `diff snapshot`。这些来源共同支持 owner 分离，但不支持“只有一种成熟 diff 拼写”；AB 的显式 mode 必须由自身 typed observation identity 与 capture-shape 合同来辩护。
 
-任何绿色结果都不能外推为全部 Hard 或任意站点成熟度；任何失败也必须先按 Action、Wait、Observation、Resource、Host deadline 或 Agent decision 分类，不能重新回到页面专用 helper。
+其余编译、Rust/Host 检查、生成、package identity 和真实 Chrome 场景只承担一致性职责：确认协议、SDK、Runtime、self-contained Skill 与 npm 产物来自同一份 `ab-runtime@0.3.0-alpha.3+38740b80c983899f` 源码，并且本批没有破坏既有 owner。它们不能替代上面的设计证据，也不能外推为任意站点或全部 Hard 已成熟。
 
-2026-09-02 先在 `ab-runtime@0.3.0-alpha.2+acfa88a6bbd52e0d` 候选构建上完成机制验证，再由同一源码生成最终候选 `ab-runtime@0.3.0-alpha.3+da1253dac2f83a06`。两层证据不能混成一个未经绑定的“当前版本通过”：
-
-- `bun run docs:sync`、`bun run typecheck`、`bun run benchmark:typecheck`、`cargo check --workspace --all-targets`、`cargo fmt --all -- --check`、`git diff --check` 全部通过；Skill 使用带 PyYAML 的隔离 Python 环境通过格式校验；
-- `bun run build` 完整生成 protocol、Node host、release Rust runtime、SDK 与 self-contained Skill；随后在 Node 24 下执行 `bun run release:prepare -- 0.3.0-alpha.3`，重新完成 clippy、Rust workspace、152 项 Host 测试、类型检查、release build、identity 校验与 npm pack dry-run，最终 manifest 与三个 package version 均为 `0.3.0-alpha.3`；
-- 仓库根加入 `.node-version=24` 与开发引擎约束 `node: 24.x`，因为 CI/release 本来就在 Node 24，而 Node 26 改变了 `util.inspect` 对 Proxy 的展示，使一项 Host 文本断言产生纯展示差异；没有为适配未声明的 Node 26 去修改产品合同或放宽测试。发布 SDK 仍保持其既有 `node >=20` 消费约束；
-- `cargo test --workspace --quiet` 通过，agent-browser 两组测试分别为 `1127 passed, 105 ignored` 与 `1156 passed, 105 ignored`，AB runtime 为 `2 passed`；
-- 最终 `alpha.3+da1253dac2f83a06` 构建再次执行默认真实 Chrome live suite，结果为 `22/22`，包含 multiprocess persistence、profile lock、OOPIF/session/resource、AX action、large document diff、overlay、animation、SPA、pointer hit target/sequence、background popup、locator、cancellation、scheduler、HAR、Skill client 与 dialog；Skill client 现场同时证明 silent mutation 不生成 presentation，显式 observation 才产生 presentation，Agent `Locator.waitFor()` 也不再隐式输出 state；
-- 官方 MiniWoB++ HTML 的 `click-test`、`enter-text` 均得到原始 reward `1`，`book-flight-nodelay` 的 autocomplete 提交值为 `Anvik, AK (ANV)`；传输链是 AB TypeScript SDK → Rust Runtime → CDP → Chrome；
-- 大文档场景不再验证已退出 Agent facade 的 `actionBaseline()`，而是验证 mutation 不创建/展示 observation、不替换 baseline，随后显式 `ax.write("diff")` 继承同一 capture shape；Core 显式 action-observation deadline 仍保持结构化失败。
-
-最终构建还在官方 WebArena-Verified `1.2.3`、全新 reset 的 `shopping_admin` 容器上执行 Hard 771：起始页恢复为 5 条 Pending，Agent 通过 AX、semantic/CSS Locator、typed `isChecked/inputValue/selectOption` 和 trusted pointer action 读出 352 为四星、347 为五星，只批准这两条，并在页面读回两条均为 Approved。过程中没有 screenshot、CUA、evaluate、raw CDP、HTTP/API 直改或任务专用 helper。官方 NetworkEventEvaluator 得分 `1.0`，HAR 为 926 entries、`complete:true`，无 body/attachment failure，也无 late-attached target。正式产物位于被 gitignore 的 `benchmark/output/alpha3-final-clean-20260902/771/`：
-
-- `eval_result.json` SHA-256：`078bbeafa3701a521ccba8334ff6752b264026fcd18e3f3d36351b47a73b9c43`；
-- `network.har` SHA-256：`eba65bb23488ed33f1682fa264ca945494fbf05e595d9d8433f9ac5b60d9c41b`；
-- `agent_response.json` SHA-256：`5443c04623ea249da72e3416665b576d9440e12d4e7d65174f4eac167f7cf2c4`。
-
-第一次最终评测协调器启动时，页面在 Agent 操作前已经只剩 3 条 Pending，说明环境仍带有上一轮 352/347 mutation；该 session 被终止且没有提交 evaluator。随后使用官方 `webarena-verified env start` 删除旧容器并重新创建环境，只有在页面确认恢复 5 条后才形成上述结果。这个过程用于保证 provenance，不是 AB 产品逻辑。
-
-这些结果证明本批责任拆分没有破坏现有机械能力和已保存的复杂场景，也把一个官方复杂 mutation 绑定到了最终 alpha.3 build。771 仍是 source-aware 聚焦回归，不等价于 fresh Skill-only 六题已在 alpha.3 全量重跑，更不能外推为全部 Hard。历史 fresh 六题 `4/6` 与 source-aware 六题 `6/6` 仍按既有记录保留，只有在相同 evaluator、任务配置和来源条件下重新运行，才能形成新的可比统计。
+官方 WebArena-Verified Hard 771 仍保留为复杂 mutation 的独立结果：在 reset 的 `shopping_admin` 环境中，Agent 只通过 AX、semantic/CSS Locator、typed field reads 和 trusted pointer action 识别并批准符合条件的 review；官方 NetworkEventEvaluator 确认最终副作用正确。这个结果说明 action/wait/observation 分离没有迫使 Agent 使用 screenshot、CUA、evaluate、raw CDP、HTTP 直改或任务专用 helper，但它不决定 `waitForLoadState()` 的生命周期语义，也不决定 diff 应显式还是自动。

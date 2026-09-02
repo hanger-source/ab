@@ -103,7 +103,7 @@ export class AX {
     options?: WriteOptions,
   ): Promise<{ state: AXState; screenshot: Screenshot }>;
   write(
-    content: AXWriteContent,
+    content: AXContent,
     options?: WriteOptions,
   ): Promise<AXState | Screenshot | { state: AXState; screenshot: Screenshot }>;
   write(state: AXState): Promise<AXState>;

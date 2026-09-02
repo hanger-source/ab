@@ -52,6 +52,11 @@ const cases: LiveCase[] = [
     default: true,
   },
   {
+    name: "scenario-page-wait-boundaries",
+    file: "scenarios/page-wait-boundaries/live.ts",
+    default: true,
+  },
+  {
     name: "scenario-pointer-hit-target-layout-shift",
     file: "scenarios/pointer-hit-target-layout-shift/live.ts",
     default: true,

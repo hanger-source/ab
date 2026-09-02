@@ -33,7 +33,7 @@ export declare class AX {
         state: AXState;
         screenshot: Screenshot;
     }>;
-    write(content: AXWriteContent, options?: WriteOptions): Promise<AXState | Screenshot | {
+    write(content: AXContent, options?: WriteOptions): Promise<AXState | Screenshot | {
         state: AXState;
         screenshot: Screenshot;
     }>;
