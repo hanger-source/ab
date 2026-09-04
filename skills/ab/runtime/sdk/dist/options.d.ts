@@ -3,4 +3,13 @@ export type OperationOptions = {
     timeoutMs?: number;
     signal?: AbortSignal;
 };
+export type BrowserProvider = {
+    kind: "managed";
+} | {
+    kind: "external";
+    webSocketUrl: string;
+};
+export type ConnectOptions = OperationOptions & {
+    provider?: BrowserProvider;
+};
 //# sourceMappingURL=options.d.ts.map

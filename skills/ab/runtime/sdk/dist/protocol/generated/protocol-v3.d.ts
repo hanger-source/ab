@@ -1,6 +1,6 @@
 export declare const PROTOCOL_VERSION: 3;
-export declare const SDK_VERSION: "0.3.0-rc.1";
-export declare const BUILD_ID: "ab-runtime@0.3.0-rc.1+9e903c78495ade4d";
+export declare const SDK_VERSION: "0.3.0-rc.2";
+export declare const BUILD_ID: "ab-runtime@0.3.0-rc.2+cfa635fc0dd58d50";
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
     [key: string]: JsonValue;
 };
@@ -37,7 +37,7 @@ export type ClientHello = {
     sdkVersion: string;
     buildId: string;
 };
-export type ChromeSource = "launched" | "reattached";
+export type ChromeSource = "launched" | "reattached" | "external";
 export type ChromeIdentity = {
     source: ChromeSource;
     pid: number | null;

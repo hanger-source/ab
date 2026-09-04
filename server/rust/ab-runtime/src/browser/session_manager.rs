@@ -134,7 +134,6 @@ impl SessionManager {
             changed: Notify::new(),
         });
         manager.spawn_event_pump();
-        manager.bootstrap().await?;
         Ok(manager)
     }
 
@@ -578,15 +577,13 @@ impl SessionManager {
         realms
     }
 
-    pub async fn open_tab(self: &Arc<Self>, url: &str) -> AbResult<TargetSession> {
+    pub(crate) async fn create_target(&self, url: &str) -> AbResult<String> {
         let result = self
             .client
             .send_command("Target.createTarget", Some(json!({ "url": url })), None)
             .await
             .map_err(|message| session_error("target.create", message))?;
-        let target_id = required_string(&result, "targetId", "target.create")?.to_owned();
-        self.wait_for_target(&target_id, Duration::from_secs(10))
-            .await
+        Ok(required_string(&result, "targetId", "target.create")?.to_owned())
     }
 
     pub async fn register_init_script(
@@ -648,7 +645,7 @@ impl SessionManager {
         Ok(())
     }
 
-    async fn bootstrap(self: &Arc<Self>) -> AbResult<()> {
+    pub(crate) async fn enable_discovery(&self) -> AbResult<()> {
         self.client
             .send_command(
                 "Target.setDiscoverTargets",
@@ -657,6 +654,10 @@ impl SessionManager {
             )
             .await
             .map_err(|message| session_error("target.discover", message))?;
+        Ok(())
+    }
+
+    pub(crate) async fn enable_managed_auto_attach(&self) -> AbResult<()> {
         self.client
             .send_command(
                 "Target.setAutoAttach",
@@ -674,41 +675,57 @@ impl SessionManager {
             )
             .await
             .map_err(|message| session_error("target.auto_attach", message))?;
+        Ok(())
+    }
+
+    pub(crate) async fn page_target_values(&self) -> AbResult<Vec<Value>> {
         let targets = self
             .client
             .send_command("Target.getTargets", Some(json!({})), None)
             .await
             .map_err(|message| session_error("target.list", message))?;
-        let pages = targets
+        Ok(targets
             .get("targetInfos")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter(|target| track_page_value(target))
-            .collect::<Vec<_>>();
-        let page_ids = pages
-            .iter()
-            .filter_map(|target| target.get("targetId").and_then(Value::as_str))
-            .collect::<Vec<_>>();
-        eprintln!(
-            "[ab.session] bootstrap discovered_pages={} target_ids={}",
-            pages.len(),
-            page_ids.join(",")
-        );
-        for target in pages.iter().copied() {
-            let target_id = required_string(target, "targetId", "target.bootstrap")?;
-            let ready = self
-                .wait_for_target(target_id, Duration::from_secs(10))
-                .await?;
-            eprintln!(
-                "[ab.session] bootstrap target_ready target_id={} session_id={}",
-                ready.target_id, ready.session_id
-            );
+            .cloned()
+            .collect())
+    }
+
+    pub(crate) async fn attach_target(
+        self: &Arc<Self>,
+        target_id: &str,
+    ) -> AbResult<TargetSession> {
+        if let Ok(target) = self.target(target_id).await {
+            return Ok(target);
         }
-        if pages.is_empty() {
-            self.open_tab("about:blank").await?;
+        let info = self
+            .client
+            .send_command(
+                "Target.getTargetInfo",
+                Some(json!({ "targetId": target_id })),
+                None,
+            )
+            .await
+            .map_err(|message| session_error("target.info", message))?;
+        let value = info.get("targetInfo").ok_or_else(|| {
+            session_error(
+                "target.info",
+                format!("CDP did not return targetInfo for tab {target_id}"),
+            )
+        })?;
+        if !track_page_value(value) {
+            return Err(AbError::new(
+                "target_not_found",
+                "target.attach",
+                format!("tab {target_id} is not an attachable page target"),
+            ));
         }
-        Ok(())
+        self.attach_existing_page(value).await?;
+        self.wait_for_target(target_id, Duration::from_secs(10))
+            .await
     }
 
     async fn attach_existing_page(self: &Arc<Self>, value: &Value) -> AbResult<()> {
@@ -752,16 +769,30 @@ impl SessionManager {
 
         // Target.attachedToTarget can win the race with this explicit attach and
         // start registration on the event pump. In that case register_target()
-        // observes the existing session, but its Page/Runtime/Network bootstrap
-        // is still running asynchronously. Browser readiness must not be
-        // published until every page discovered during bootstrap is usable.
+        // observes the existing session while initialization is still running.
         let ready = self
             .wait_for_target(&target_id, Duration::from_secs(10))
             .await?;
         eprintln!(
-            "[ab.session] bootstrap target_ready target_id={} session_id={}",
+            "[ab.session] attach target_ready target_id={} session_id={}",
             ready.target_id, ready.session_id
         );
+        Ok(())
+    }
+
+    pub(crate) async fn detach_target(&self, target_id: &str) -> AbResult<()> {
+        let Ok(target) = self.target(target_id).await else {
+            return Ok(());
+        };
+        self.client
+            .send_command(
+                "Target.detachFromTarget",
+                Some(json!({ "sessionId": target.session_id })),
+                None,
+            )
+            .await
+            .map_err(|message| session_error("target.detach", message))?;
+        self.remove_root(target_id).await;
         Ok(())
     }
 
@@ -772,8 +803,8 @@ impl SessionManager {
             loop {
                 match receiver.recv().await {
                     Ok(event) => manager.handle_event(event).await,
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let _ = manager.resync_targets().await;
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        eprintln!("[ab.session] event_stream_lagged skipped={skipped}")
                     }
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
@@ -1416,7 +1447,7 @@ impl SessionManager {
         }
     }
 
-    async fn update_target_info(&self, params: &Value) {
+    pub(crate) async fn update_target_info(&self, params: &Value) {
         let target = params.get("targetInfo").unwrap_or(params);
         let Some(target_id) = target.get("targetId").and_then(Value::as_str) else {
             return;
@@ -1538,7 +1569,7 @@ impl SessionManager {
         self.state.read().await.sessions.get(session_id).cloned()
     }
 
-    async fn wait_for_target(
+    pub(crate) async fn wait_for_target(
         &self,
         target_id: &str,
         duration: Duration,
@@ -1563,7 +1594,7 @@ impl SessionManager {
         }
     }
 
-    async fn resync_targets(self: &Arc<Self>) -> AbResult<()> {
+    pub(crate) async fn resync_all_pages(self: &Arc<Self>) -> AbResult<()> {
         let targets = self
             .client
             .send_command("Target.getTargets", Some(json!({})), None)

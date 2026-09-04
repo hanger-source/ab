@@ -4,9 +4,9 @@ AB has three deliberately different lifetimes:
 
 1. The Node.js Agent client lasts for one interactive task or managed JavaScript kernel.
 2. The Rust daemon is shared by compatible clients and stays hidden behind `connect()`.
-3. The headed Chrome and its fixed AB profile survive client and daemon replacement.
+3. The selected Chrome persists independently: managed Chrome and its fixed AB profile survive client and daemon replacement; external Chrome remains user-owned.
 
-Do not collapse these into one "browser process" lifetime. `browser.disconnect()` releases only the current client's server-owned objects and target leases. It does not close Chrome or erase the profile.
+Do not collapse these into one "browser process" lifetime. `browser.disconnect()` releases only the current client's server-owned objects and target leases. For external Chrome it also detaches sessions acquired by that client. It does not close tabs, close Chrome, or erase a profile.
 
 With no operation in flight, graceful `browser.disconnect()` first asks Rust to release every Resource, observation, artifact, element, CDP session, and target lease owned by this client, waits for the acknowledgement, and then closes the transport. Its completion is therefore a usable handoff boundary for another client. Disconnect during an in-flight operation and abrupt socket closure use the interruption/EOF boundary so Rust can cancel or settle the operation before performing the same idempotent cleanup. Locally cached presentation objects are discarded afterward and cannot make a completed transport disconnect fail merely because an individual dispose request is no longer reachable.
 
@@ -18,6 +18,14 @@ Connect once and enumerate before creating state:
 const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
 const agent = await connect();
 let tabs = await agent.tabs.list();
+```
+
+When the user explicitly selected their Chrome, pass the external provider in this first call and keep it for the whole JavaScript session:
+
+```js
+const agent = await connect({
+  provider: { kind: "external", webSocketUrl },
+});
 ```
 
 Keep the same managed JavaScript kernel for follow-up expressions. `connect()` is idempotent within that process and returns the same pending or connected Agent facade until it is disconnected.
@@ -74,11 +82,11 @@ for (const targetId of openedByTask) {
 await agent.disconnect();
 ```
 
-Do not invent a daemon stop step. Chrome persistence is a product behavior, not leaked cleanup.
+Do not invent a daemon stop step. Managed Chrome persistence and external Chrome ownership are provider behavior, not leaked cleanup.
 
 ## Interruption and reconnection
 
-If the JavaScript kernel is interrupted or reset, its socket closure causes Rust to release that client's resources and target leases. Chrome and ordinary tabs remain. Start a new kernel, call `connect()`, list tabs again, deliberately acquire the intended available target, and rebuild local variables from browser facts.
+If the JavaScript kernel is interrupted or reset, its socket closure causes Rust to release that client's resources and target leases; external sessions are detached. Chrome and ordinary tabs remain. Start a new kernel, call `connect()` with the same selected provider, list tabs again, deliberately acquire the intended available target, and rebuild local variables from browser facts.
 
 Never assume a JavaScript object from a dead process is recoverable. Never replay a mutation solely because the process ended while awaiting it. Reconnect, observe the current page, and decide from the actual state; a dispatched mutation may have completed.
 

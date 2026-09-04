@@ -1,6 +1,7 @@
 import { inspect } from "node:util";
 import { Browser as CoreBrowser, Tab as CoreTab, } from "../browser/index.js";
 import { connect as connectCore } from "../index.js";
+import { browserProviderKey, normalizeBrowserProvider, } from "../runtime/provider.js";
 import { AX } from "./ax.js";
 import { CUA } from "./cua.js";
 import { Dev } from "./dev.js";
@@ -199,22 +200,35 @@ export class Browser {
     }
 }
 let currentBrowser;
+let currentProviderKey;
 /** Connects the Agent facade to the Core SDK and version-matched Rust runtime. */
 export function connect(options = {}) {
-    if (currentBrowser)
+    const provider = normalizeBrowserProvider(options.provider);
+    const providerKey = browserProviderKey(provider);
+    if (currentBrowser) {
+        if (currentProviderKey !== providerKey) {
+            return Promise.reject(new Error("this JavaScript process is already connected to a different AB browser provider; disconnect it before connecting another provider"));
+        }
         return currentBrowser;
+    }
     const presenter = options.presenter ?? defaultPresenter();
     const connecting = connectCore({
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
+        provider,
     }).then((core) => Browser.create(core, presenter, () => {
-        if (currentBrowser === connecting)
+        if (currentBrowser === connecting) {
             currentBrowser = undefined;
+            currentProviderKey = undefined;
+        }
     }));
     currentBrowser = connecting;
+    currentProviderKey = providerKey;
     void connecting.catch(() => {
-        if (currentBrowser === connecting)
+        if (currentBrowser === connecting) {
             currentBrowser = undefined;
+            currentProviderKey = undefined;
+        }
     });
     return connecting;
 }

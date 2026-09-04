@@ -1,7 +1,7 @@
 // Generated from server/rust/ab-protocol. Do not edit.
 export const PROTOCOL_VERSION = 3 as const;
-export const SDK_VERSION = "0.3.0-rc.1" as const;
-export const BUILD_ID = "ab-runtime@0.3.0-rc.1+9e903c78495ade4d" as const;
+export const SDK_VERSION = "0.3.0-rc.2" as const;
+export const BUILD_ID = "ab-runtime@0.3.0-rc.2+cfa635fc0dd58d50" as const;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -15,7 +15,7 @@ export type TraceContext = { traceId: string, };
 
 export type ClientHello = { protocolVersion: number, sdkVersion: string, buildId: string, };
 
-export type ChromeSource = "launched" | "reattached";
+export type ChromeSource = "launched" | "reattached" | "external";
 
 export type ChromeIdentity = { source: ChromeSource, pid: number | null, };
 

@@ -1,5 +1,10 @@
 import { Browser } from "./browser/index.js";
 import { ProtocolClient } from "./transport/index.js";
+import {
+  browserProviderKey,
+  normalizeBrowserProvider,
+} from "./runtime/provider.js";
+import type { ConnectOptions } from "./options.js";
 
 export { ABError, type ABErrorData } from "./errors/index.js";
 export {
@@ -25,7 +30,7 @@ export {
   type ElementInspectionOptions,
   type ElementInspectionRequest,
 } from "./elements/index.js";
-export type { OperationOptions } from "./options.js";
+export type { BrowserProvider, ConnectOptions, OperationOptions } from "./options.js";
 export {
   ConsoleObserver,
   Dialog,
@@ -124,6 +129,7 @@ export {
 } from "./browser/index.js";
 
 let currentBrowser: Promise<Browser> | undefined;
+let currentProviderKey: string | undefined;
 
 /**
  * Connects this JavaScript process to the persistent AB browser runtime.
@@ -132,24 +138,34 @@ let currentBrowser: Promise<Browser> | undefined;
  * listening, it launches the exact native runtime shipped with this SDK and
  * waits for the same handshake. Repeated calls in one process share a client.
  */
-export function connect(options: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Browser> {
+export function connect(options: ConnectOptions = {}): Promise<Browser> {
+  const provider = normalizeBrowserProvider(options.provider);
+  const providerKey = browserProviderKey(provider);
   if (currentBrowser) {
+    if (currentProviderKey !== providerKey) {
+      return Promise.reject(new Error(
+        "this JavaScript process is already connected to a different AB browser provider; disconnect it before connecting another provider",
+      ));
+    }
     return currentBrowser;
   }
   if (options.signal?.aborted) {
     return Promise.reject(new DOMException("AB connection was cancelled", "AbortError"));
   }
-  const connecting = ProtocolClient.connect(options.timeoutMs, options.signal).then((client) => {
+  const connecting = ProtocolClient.connect(provider, options.timeoutMs, options.signal).then((client) => {
     return new Browser(client, () => {
       if (currentBrowser === connecting) {
         currentBrowser = undefined;
+        currentProviderKey = undefined;
       }
     });
   });
   currentBrowser = connecting;
+  currentProviderKey = providerKey;
   void connecting.catch(() => {
     if (currentBrowser === connecting) {
       currentBrowser = undefined;
+      currentProviderKey = undefined;
     }
   });
   return connecting;

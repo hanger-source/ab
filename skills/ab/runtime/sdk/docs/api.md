@@ -9,6 +9,9 @@ connect(options?: {
   timeoutMs?: number;
   signal?: AbortSignal;
   presenter?: Presenter;
+  provider?:
+    | { kind: "managed" }
+    | { kind: "external"; webSocketUrl: string };
 }): Promise<Browser>
 
 browser.identity
@@ -25,17 +28,25 @@ browser.documentation(topic?:
 ): Promise<string>
 ```
 
-`connect()` privately launches the matching native runtime only when the fixed Unix socket is unavailable. It never exposes daemon lifecycle commands. In a compatible managed Node REPL MCP host—Codex built-in or Qwen—the default Presenter emits bounded AX text and verified screenshot bytes as standard MCP content; in an ordinary Node process it writes text and screenshot artifact metadata to stdout. A host may inject another typed Presenter.
+`connect()` privately launches the matching native runtime only when the selected provider's Unix socket is unavailable. It never exposes daemon lifecycle commands. In a compatible managed Node REPL MCP host—Codex built-in or Qwen—the default Presenter emits bounded AX text and verified screenshot bytes as standard MCP content; in an ordinary Node process it writes text and screenshot artifact metadata to stdout. A host may inject another typed Presenter.
 
 ## Core connection
 
 ```ts
 import { connect } from "@hanger-source/ab";
 
-connect(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<Browser>
+connect(options?: {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  provider?:
+    | { kind: "managed" }
+    | { kind: "external"; webSocketUrl: string };
+}): Promise<Browser>
 ```
 
 Agent and Core use one transport and Rust runtime. `@hanger-source/ab/agent` is a typed facade, not a second browser implementation.
+
+The default `managed` provider owns AB's Chrome and fixed profile. The explicit `external` provider connects the supplied browser-level DevTools WebSocket endpoint, uses a separate runtime socket, and never falls back to managed Chrome. One JavaScript process must disconnect before selecting another provider.
 
 ## Structured errors and traces
 

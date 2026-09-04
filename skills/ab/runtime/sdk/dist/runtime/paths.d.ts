@@ -1,5 +1,6 @@
-export declare function runtimeDirectory(): string;
-export declare function socketPath(): string;
-export declare function startupPath(): string;
+import type { BrowserProvider } from "../options.js";
+export declare function runtimeDirectory(provider: BrowserProvider): string;
+export declare function socketPath(provider: BrowserProvider): string;
+export declare function startupPath(provider: BrowserProvider): string;
 export declare function dataDirectory(): string;
 //# sourceMappingURL=paths.d.ts.map

@@ -53,7 +53,8 @@
       "type": "string",
       "enum": [
         "launched",
-        "reattached"
+        "reattached",
+        "external"
       ]
     },
     "ClientClosed": {

@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { closeSync, constants, mkdirSync, openSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { dataDirectory, startupPath } from "./paths.js";
+import { dataDirectory, runtimeDirectory, startupPath } from "./paths.js";
 const require = createRequire(import.meta.url);
 export async function resolveRuntimeBinary() {
     const configured = process.env.AB_RUNTIME_BINARY;
@@ -25,15 +25,25 @@ export async function resolveRuntimeBinary() {
     await assertExecutable(binary);
     return binary;
 }
-export function launchRuntime(binaryPath) {
+export function launchRuntime(binaryPath, provider) {
     const logsDirectory = join(dataDirectory(), "logs");
     mkdirSync(logsDirectory, { recursive: true, mode: 0o700 });
     const output = openSync(join(logsDirectory, "runtime.stderr.log"), "a", 0o600);
     try {
+        const env = {
+            ...process.env,
+            AB_RUNTIME_DIR: runtimeDirectory(provider),
+        };
+        if (provider.kind === "external") {
+            env.AB_CHROME_WS_URL = provider.webSocketUrl;
+        }
+        else {
+            delete env.AB_CHROME_WS_URL;
+        }
         const child = spawn(binaryPath, [], {
             detached: true,
             stdio: ["ignore", output, output],
-            env: process.env,
+            env,
         });
         child.unref();
     }
@@ -41,9 +51,9 @@ export function launchRuntime(binaryPath) {
         closeSync(output);
     }
 }
-export async function readRuntimeStartupState() {
+export async function readRuntimeStartupState(provider) {
     try {
-        const value = JSON.parse(await readFile(startupPath(), "utf8"));
+        const value = JSON.parse(await readFile(startupPath(provider), "utf8"));
         if (typeof value.startupId !== "string" || typeof value.state !== "string") {
             throw new Error("AB runtime startup state is malformed");
         }

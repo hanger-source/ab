@@ -34,12 +34,12 @@ export class ProtocolClient {
         })));
         socket.unref();
     }
-    static async connect(timeoutMs = 30_000, signal) {
-        const path = socketPath();
+    static async connect(provider, timeoutMs = 30_000, signal) {
+        const path = socketPath(provider);
         const deadline = Date.now() + timeoutMs;
         let socket;
         if (!existsSync(path)) {
-            socket = await launchAndWaitForSocket(path, deadline, signal);
+            socket = await launchAndWaitForSocket(provider, path, deadline, signal);
         }
         else {
             try {
@@ -49,7 +49,7 @@ export class ProtocolClient {
                 if (!isRecoverableConnectError(error)) {
                     throw error;
                 }
-                socket = await launchAndWaitForSocket(path, deadline, signal);
+                socket = await launchAndWaitForSocket(provider, path, deadline, signal);
             }
         }
         let ready;
@@ -62,7 +62,7 @@ export class ProtocolClient {
                 throw error;
             }
             await waitForDaemonRelease(path, remainingTimeout(deadline), signal);
-            socket = await launchAndWaitForSocket(path, deadline, signal);
+            socket = await launchAndWaitForSocket(provider, path, deadline, signal);
             try {
                 ready = await handshake(socket, remainingTimeout(deadline), signal);
             }
@@ -483,14 +483,14 @@ function openSocket(path, signal) {
         socket.connect(path);
     });
 }
-async function launchAndWaitForSocket(path, deadline, signal) {
-    const baseline = await readRuntimeStartupState();
+async function launchAndWaitForSocket(provider, path, deadline, signal) {
+    const baseline = await readRuntimeStartupState(provider);
     const binary = await resolveRuntimeBinary();
-    launchRuntime(binary);
-    const startup = await waitForRuntimeReady(baseline?.startupId ?? null, deadline, signal);
-    return waitForSocket(path, remainingTimeout(deadline), signal, startupSignature(startup));
+    launchRuntime(binary, provider);
+    const startup = await waitForRuntimeReady(provider, baseline?.startupId ?? null, deadline, signal);
+    return waitForSocket(provider, path, remainingTimeout(deadline), signal, startupSignature(startup));
 }
-async function waitForRuntimeReady(baselineStartupId, deadline, signal) {
+async function waitForRuntimeReady(provider, baselineStartupId, deadline, signal) {
     while (Date.now() < deadline) {
         if (signal?.aborted) {
             throw new ABError({
@@ -499,7 +499,7 @@ async function waitForRuntimeReady(baselineStartupId, deadline, signal) {
                 message: "AB startup wait was cancelled",
             });
         }
-        const state = await readRuntimeStartupState();
+        const state = await readRuntimeStartupState(provider);
         if (state && state.startupId !== baselineStartupId) {
             if (state.state === "failed" && state.error) {
                 throw new ABError(state.error);
@@ -516,7 +516,7 @@ async function waitForRuntimeReady(baselineStartupId, deadline, signal) {
         message: "AB runtime did not publish a new ready state or structured failure before the deadline",
     });
 }
-async function waitForSocket(path, timeoutMs, signal, startupBaseline = null) {
+async function waitForSocket(provider, path, timeoutMs, signal, startupBaseline = null) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {
@@ -535,11 +535,11 @@ async function waitForSocket(path, timeoutMs, signal, startupBaseline = null) {
             if (!isRecoverableConnectError(error)) {
                 throw error;
             }
-            await throwNewStartupFailure(startupBaseline);
+            await throwNewStartupFailure(provider, startupBaseline);
             await delay(50);
         }
     }
-    await throwNewStartupFailure(startupBaseline);
+    await throwNewStartupFailure(provider, startupBaseline);
     throw new ABError({
         kind: "daemon_start_timeout",
         stage: "sdk.socket.wait",
@@ -547,8 +547,8 @@ async function waitForSocket(path, timeoutMs, signal, startupBaseline = null) {
         details: lastError instanceof Error ? lastError.message : lastError,
     });
 }
-async function throwNewStartupFailure(baseline) {
-    const state = await readRuntimeStartupState();
+async function throwNewStartupFailure(provider, baseline) {
+    const state = await readRuntimeStartupState(provider);
     if (state?.state === "failed"
         && state.error
         && startupSignature(state) !== baseline) {

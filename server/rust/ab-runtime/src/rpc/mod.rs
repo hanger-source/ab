@@ -126,6 +126,7 @@ async fn serve_client_inner(mut stream: UnixStream, state: Arc<DaemonState>) -> 
             source: match state.chrome_source {
                 "launched" => ChromeSource::Launched,
                 "reattached" => ChromeSource::Reattached,
+                "external" => ChromeSource::External,
                 other => {
                     return Err(AbError::new(
                         "invalid_daemon_state",

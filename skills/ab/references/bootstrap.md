@@ -11,7 +11,7 @@ const agent = await connect();
 
 Do not import `@hanger-source/ab/agent` from the task working directory. Node package resolution is deliberately not part of the Skill contract. `ab-client.mjs` selects the native runtime packaged with the same Skill and privately launches it only when its current-user Unix socket is unavailable.
 
-The Skill client owns the product paths. It always binds the current user's fixed AB runtime directory, application-data directory, and `chrome-profile`; inherited `AB_RUNTIME_DIR`, `AB_DATA_DIR`, `AB_PROFILE_DIR`, or `AB_CHROME_PATH` development variables do not redirect Agent browser work. Programmatic Core SDK tests may use those variables, but the installed Agent Skill may not.
+The Skill client owns the product paths. It binds the current user's AB runtime base, application-data directory, and managed `chrome-profile`; inherited `AB_RUNTIME_DIR`, `AB_DATA_DIR`, `AB_PROFILE_DIR`, or `AB_CHROME_PATH` development variables do not redirect Agent browser work. Programmatic Core SDK tests may use those variables, but the installed Agent Skill may not. An explicitly selected external provider derives a separate runtime socket from the endpoint origin.
 
 If the client or packaged runtime is missing, the Skill installation is incomplete. Stop with that exact diagnosis; do not inspect source, `.d.ts`, workspace `node_modules`, or another global package to guess a replacement.
 
@@ -20,10 +20,24 @@ AB intentionally has no start, stop, restart, daemon, status, or profile CLI. Th
 - an existing matching daemon is reused;
 - an idle mismatched daemon yields to the exact SDK build;
 - a mismatched daemon with another client or dispatched mutation fails explicitly;
-- Chrome persists independently of the Node process;
-- a replacement daemon reattaches only the Chrome identity owned by AB's fixed profile.
+- the selected Chrome persists independently of the Node process;
+- a managed replacement daemon reattaches only the Chrome identity owned by AB's fixed profile;
+- an external runtime connects only the explicitly supplied browser-level WebSocket endpoint.
 
-There is one AB-specific headed Chrome profile. Cookies and storage survive Node sessions and Agent tasks. AB does not attach to the user's ordinary Chrome profile and does not switch to a temporary profile when the fixed profile is unavailable.
+There is one AB-specific headed Chrome profile for the default managed provider. Cookies and storage survive Node sessions and Agent tasks. AB does not switch to a temporary profile when the fixed profile is unavailable.
+
+The external provider is an explicit alternative for an already-running Chrome whose remote debugging endpoint the user has enabled:
+
+```js
+const agent = await connect({
+  provider: {
+    kind: "external",
+    webSocketUrl: "ws://127.0.0.1:9222/devtools/browser/<browser-id>",
+  },
+});
+```
+
+On macOS, Chrome writes the debugging port and browser WebSocket path as the two lines of `<user-data-dir>/DevToolsActivePort`. Use that exact endpoint. The external provider does not launch Chrome, copy a profile, attach all tabs, fall back to managed Chrome, or share the managed runtime socket.
 
 ## Persistent JavaScript session
 
@@ -91,7 +105,7 @@ browser.identity;
 // clientId, daemonId, browserGeneration, chrome.source, chrome.pid
 ```
 
-`chrome.source` says whether this runtime launched or reattached the AB-owned Chrome. It does not make the profile temporary or caller-owned.
+`chrome.source` is `launched` or `reattached` for managed Chrome and `external` for a caller-supplied endpoint. External Chrome has no AB-owned pid, so `chrome.pid` is `null`.
 
 When `connect()` launches a runtime, the SDK waits for that exact startup attempt to publish `ready` or a structured `failed` state before opening the protocol socket. A bound Unix socket is not treated as browser readiness. Profile ownership and Chrome launch failures therefore surface with their Rust `kind` and `stage`, rather than being rewritten as a generic startup timeout.
 

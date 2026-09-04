@@ -14,7 +14,7 @@ let tab = candidate
 
 `Tab.id` is the Chrome target id and remains stable across navigation. Frames, documents, realms, observations, refs, element handles, screenshots, and resources have narrower identities and can become stale while the tab remains valid.
 
-`Tab.active` is live browser state, not creation order or an SDK-local guess. Rust probes whether the attached document is the visible selected tab when metadata is listed or refreshed; an unresponsive/discarded renderer is reported inactive rather than delaying the whole list indefinitely.
+`Tab.active` is a browser-state snapshot, not creation order or an SDK-local selector. Rust probes attached documents when metadata is listed or refreshed; an unresponsive/discarded renderer is reported inactive rather than delaying the whole list indefinitely. External targets that have only been discovered and not acquired are not attached merely to determine activity, so their discovery descriptor reports `active: false` until acquisition.
 
 After navigation or a meaningful rerender, take a new observation. Do not reuse coordinates across viewport changes or a ref across document generations.
 
@@ -45,7 +45,7 @@ The persistent Chrome is shared, but mutation authority is not. `tabs.list()` an
 
 `tabs.open()` atomically owns its new target. To reuse an existing available target, call `tabs.acquire(targetId)` before navigation, activation, evaluate, input, CDP mutation, or close. The same client may acquire it again. An acquire against `other` fails with `target_in_use`; do not wait, retry, steal, or silently switch to another target.
 
-Reads and bounded observations remain possible without a lease so an Agent can identify the right candidate. The Runtime checks every mutation again; a stale local `ownership` field never grants authority.
+Managed-provider targets are already attached, so reads and bounded observations remain possible without a lease while an Agent identifies the right candidate. External-provider discovery deliberately does not attach user tabs: use URL/title metadata to select a candidate, acquire that exact target, and only then observe its page. The Runtime checks every mutation again; a stale local `ownership` field never grants authority.
 
 Target mutation ownership is not user-content ownership. Acquiring an existing tab does not authorize closing it. Maintain a local set only for tabs created by this task:
 
@@ -114,4 +114,4 @@ for (const id of createdByTask) {
 }
 ```
 
-Then disconnect the Agent client. Disconnect releases this client's target leases and server-owned resources while leaving ordinary tabs and the fixed-profile Chrome running.
+Then disconnect the Agent client. Disconnect releases this client's target leases and server-owned resources. Managed sessions remain attached to the fixed-profile Chrome; external sessions are detached while user tabs and Chrome remain open.

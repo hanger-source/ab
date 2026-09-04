@@ -11,11 +11,21 @@ pub struct Config {
     pub lock_path: PathBuf,
     pub startup_path: PathBuf,
     pub data_dir: PathBuf,
-    pub profile_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub artifacts_dir: PathBuf,
-    pub chrome_path: PathBuf,
-    pub headless: bool,
+    pub browser_provider: BrowserProviderConfig,
+}
+
+#[derive(Debug, Clone)]
+pub enum BrowserProviderConfig {
+    Managed {
+        profile_dir: PathBuf,
+        chrome_path: PathBuf,
+        headless: bool,
+    },
+    External {
+        web_socket_url: String,
+    },
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -55,35 +65,36 @@ impl Config {
         let artifacts_dir = data_dir.join("artifacts");
         create_private_dir(&artifacts_dir)?;
 
-        let product_config = read_product_config(&data_dir.join("config.json"))?;
-        let profile_dir = std::env::var_os("AB_PROFILE_DIR")
-            .map(PathBuf::from)
-            .or(product_config.profile_path)
-            .unwrap_or_else(|| data_dir.join("chrome-profile"));
-        create_private_dir(&profile_dir)?;
-
-        let chrome_path = std::env::var_os("AB_CHROME_PATH")
-            .map(PathBuf::from)
-            .or(product_config.chrome_path)
-            .unwrap_or_else(|| {
-                PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-            });
-        let headless = match std::env::var("AB_HEADLESS") {
-            Ok(value) if matches!(value.as_str(), "1" | "true") => true,
-            Ok(value) if matches!(value.as_str(), "0" | "false") => false,
-            Ok(value) => {
-                return Err(AbError::new(
-                    "configuration_error",
-                    "config.headless",
-                    format!("AB_HEADLESS must be 1, true, 0, or false; received {value:?}"),
-                ));
+        let browser_provider = match std::env::var("AB_CHROME_WS_URL") {
+            Ok(value) if !value.trim().is_empty() => BrowserProviderConfig::External {
+                web_socket_url: value.trim().to_owned(),
+            },
+            Ok(_) | Err(std::env::VarError::NotPresent) => {
+                let product_config = read_product_config(&data_dir.join("config.json"))?;
+                let profile_dir = std::env::var_os("AB_PROFILE_DIR")
+                    .map(PathBuf::from)
+                    .or(product_config.profile_path)
+                    .unwrap_or_else(|| data_dir.join("chrome-profile"));
+                create_private_dir(&profile_dir)?;
+                let chrome_path = std::env::var_os("AB_CHROME_PATH")
+                    .map(PathBuf::from)
+                    .or(product_config.chrome_path)
+                    .unwrap_or_else(|| {
+                        PathBuf::from(
+                            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                        )
+                    });
+                BrowserProviderConfig::Managed {
+                    profile_dir,
+                    chrome_path,
+                    headless: read_headless()?,
+                }
             }
-            Err(std::env::VarError::NotPresent) => false,
             Err(error) => {
                 return Err(AbError::new(
                     "configuration_error",
-                    "config.headless",
-                    format!("AB_HEADLESS is not valid UTF-8: {error}"),
+                    "config.external_chrome",
+                    format!("AB_CHROME_WS_URL is not valid UTF-8: {error}"),
                 ));
             }
         };
@@ -94,12 +105,28 @@ impl Config {
             startup_path: runtime_dir.join("startup.json"),
             runtime_dir,
             data_dir,
-            profile_dir,
             logs_dir,
             artifacts_dir,
-            chrome_path,
-            headless,
+            browser_provider,
         })
+    }
+}
+
+fn read_headless() -> AbResult<bool> {
+    match std::env::var("AB_HEADLESS") {
+        Ok(value) if matches!(value.as_str(), "1" | "true") => Ok(true),
+        Ok(value) if matches!(value.as_str(), "0" | "false") => Ok(false),
+        Ok(value) => Err(AbError::new(
+            "configuration_error",
+            "config.headless",
+            format!("AB_HEADLESS must be 1, true, 0, or false; received {value:?}"),
+        )),
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(error) => Err(AbError::new(
+            "configuration_error",
+            "config.headless",
+            format!("AB_HEADLESS is not valid UTF-8: {error}"),
+        )),
     }
 }
 

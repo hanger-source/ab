@@ -4,14 +4,14 @@ description: "Control AB's persistent headed Chrome through the version-matched 
 license: Apache-2.0
 metadata:
   author: hanger
-  version: "0.3.0-rc.1"
+  version: "0.3.0-rc.2"
   repository: https://github.com/hanger-source/ab
   compatibility: macOS arm64, Node.js 20 or later, and Google Chrome
 ---
 
 # AB browser
 
-AB is a local browser runtime for Agents. `connect()` reuses one hidden Rust daemon, one headed Chrome, and one fixed persistent profile across Node.js processes and Agent tasks. There is no extension, Playwright process, browser CLI, status command, Bun requirement, or OpenAI API key.
+AB is a local browser runtime for Agents. By default, `connect()` reuses one hidden Rust daemon, one headed Chrome, and one fixed persistent profile across Node.js processes and Agent tasks. When the user explicitly asks to use their Chrome, `connect({ provider: { kind: "external", webSocketUrl } })` connects its browser-level DevTools endpoint without an extension and keeps that runtime separate from the managed browser. There is no Playwright process, browser CLI, status command, Bun requirement, or OpenAI API key.
 
 ## Choose the browser only for browser work
 
@@ -39,9 +39,19 @@ const browser = await connect();
 let tabs = await browser.tabs.list();
 ```
 
+Choose the provider once, before connecting. Use the default managed provider unless the user explicitly asks for an already-running Chrome and its browser-level WebSocket endpoint is available. For that case:
+
+```ts
+const browser = await connect({
+  provider: { kind: "external", webSocketUrl },
+});
+```
+
+External discovery does not attach every user tab. List first, then acquire the exact target needed by the task. Do not switch providers, guess another endpoint, or fall back to managed Chrome inside the same JavaScript session. Read [bootstrap](references/bootstrap.md) for endpoint and lifecycle details.
+
 If `scripts/ab-client.mjs` or its packaged runtime is absent, stop and report that the AB Skill installation is incomplete. Do not search the project or npm installation for another copy.
 
-Reusing the managed kernel preserves local variables and the Agent presentation baseline. Reusing the AB daemon preserves Chrome, tabs, cookies, local storage, and the dedicated profile even when that kernel ends.
+Reusing the managed kernel preserves local variables and the Agent presentation baseline. Reusing the managed AB daemon preserves Chrome, tabs, cookies, local storage, and the dedicated profile even when that kernel ends. An external daemon preserves its one browser-level connection; disconnecting the Agent detaches acquired sessions without closing user tabs or Chrome.
 
 If a cell yields a running id, use the Tool's wait or cancel operation for that exact cell; never submit a second cell concurrently. The MCP yield interval is not an AB operation timeout.
 
@@ -62,7 +72,7 @@ let tab = candidate
   : await browser.tabs.open("https://example.com/");
 ```
 
-`tabs.list/get` are discovery operations. `tabs.open()` atomically owns the new target for this client; an existing available target must be explicitly acquired before navigation, activation, evaluate, input, or close. `ownership: "other"` means another active client owns mutation: do not retry, steal, or switch to a similar tab. Choose another target or report the conflict. Reads and bounded observations remain available for deliberate selection.
+`tabs.list/get` are discovery operations. `tabs.open()` atomically owns the new target for this client; an existing available target must be explicitly acquired before navigation, activation, evaluate, input, or close. `ownership: "other"` means another active client owns mutation: do not retry, steal, or switch to a similar tab. Choose another target or report the conflict. Managed tabs are already attached and permit bounded reads before acquisition; external tabs remain metadata-only until the exact target is acquired.
 
 Track tabs created for the task. Acquiring an existing tab grants mutation authority while this client is connected; it does not make the tab disposable user content. Close only task-created tabs or tabs the user explicitly asked to close. `browser.disconnect()` releases this client's target leases, observations, and event resources; it does not close tabs, Chrome, or the daemon.
 

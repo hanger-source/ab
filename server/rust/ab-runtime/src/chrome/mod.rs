@@ -1,7 +1,9 @@
-use crate::config::Config;
+use crate::browser::provider::BrowserProviderKind;
+use crate::config::BrowserProviderConfig;
 use crate::error::{AbError, AbResult};
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -16,6 +18,7 @@ pub struct ChromeHandle {
     pub generation: String,
     pub source: ChromeSource,
     pub pid: Option<u32>,
+    pub provider: BrowserProviderKind,
     #[allow(dead_code)]
     child: Option<Child>,
 }
@@ -24,6 +27,7 @@ pub struct ChromeHandle {
 pub enum ChromeSource {
     Launched,
     Reattached,
+    External,
 }
 
 impl ChromeSource {
@@ -31,6 +35,7 @@ impl ChromeSource {
         match self {
             Self::Launched => "launched",
             Self::Reattached => "reattached",
+            Self::External => "external",
         }
     }
 }
@@ -41,21 +46,34 @@ struct VersionResponse {
     web_socket_debugger_url: String,
 }
 
-pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
-    if !config.chrome_path.is_file() {
+pub async fn connect(config: &BrowserProviderConfig, logs_dir: &Path) -> AbResult<ChromeHandle> {
+    match config {
+        BrowserProviderConfig::Managed {
+            profile_dir,
+            chrome_path,
+            headless,
+        } => connect_managed(profile_dir, chrome_path, *headless, logs_dir).await,
+        BrowserProviderConfig::External { web_socket_url } => connect_external(web_socket_url),
+    }
+}
+
+async fn connect_managed(
+    profile_dir: &Path,
+    chrome_path: &Path,
+    headless: bool,
+    logs_dir: &Path,
+) -> AbResult<ChromeHandle> {
+    if !chrome_path.is_file() {
         return Err(AbError::new(
             "chrome_not_found",
             "chrome.resolve",
-            format!(
-                "Google Chrome was not found at {}",
-                config.chrome_path.display()
-            ),
+            format!("Google Chrome was not found at {}", chrome_path.display()),
         ));
     }
-    let marker_path = config.profile_dir.join(".ab-managed-profile");
-    let generation_path = config.profile_dir.join(".ab-browser-generation");
+    let marker_path = profile_dir.join(".ab-managed-profile");
+    let generation_path = profile_dir.join(".ab-browser-generation");
 
-    if let Some(ws_url) = discover_endpoint(&config.profile_dir).await {
+    if let Some(ws_url) = discover_endpoint(profile_dir).await {
         verify_marker(&marker_path)?;
         let generation = read_generation(&generation_path)?.ok_or_else(|| {
             AbError::new(
@@ -72,17 +90,18 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
             generation,
             source: ChromeSource::Reattached,
             pid: None,
+            provider: BrowserProviderKind::Managed,
             child: None,
         });
     }
 
-    if profile_looks_in_use(&config.profile_dir) {
+    if profile_looks_in_use(profile_dir) {
         return Err(AbError::new(
             "profile_in_use_unmanaged",
             "chrome.profile",
             format!(
                 "{} is locked but has no reachable DevTools endpoint",
-                config.profile_dir.display()
+                profile_dir.display()
             ),
         ));
     }
@@ -103,7 +122,7 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
         )
     })?;
 
-    let active_port_path = config.profile_dir.join("DevToolsActivePort");
+    let active_port_path = profile_dir.join("DevToolsActivePort");
     if active_port_path.exists() {
         fs::remove_file(&active_port_path).map_err(|error| {
             AbError::new(
@@ -117,7 +136,7 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
         })?;
     }
 
-    let stderr_path = config.logs_dir.join("chrome.stderr.log");
+    let stderr_path = logs_dir.join("chrome.stderr.log");
     let stderr_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -130,8 +149,8 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
             )
         })?;
 
-    let mut command = Command::new(&config.chrome_path);
-    if config.headless {
+    let mut command = Command::new(chrome_path);
+    if headless {
         command
             .arg("--headless=new")
             .arg("--window-size=1200,856")
@@ -139,7 +158,7 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
     }
     let mut child = command
         .arg("--remote-debugging-port=0")
-        .arg(format!("--user-data-dir={}", config.profile_dir.display()))
+        .arg(format!("--user-data-dir={}", profile_dir.display()))
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--disable-default-apps")
@@ -153,19 +172,20 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
             AbError::new(
                 "chrome_launch_failed",
                 "chrome.spawn",
-                format!("failed to launch {}: {error}", config.chrome_path.display()),
+                format!("failed to launch {}: {error}", chrome_path.display()),
             )
         })?;
     let pid = child.id();
 
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if let Some(ws_url) = discover_endpoint(&config.profile_dir).await {
+        if let Some(ws_url) = discover_endpoint(profile_dir).await {
             return Ok(ChromeHandle {
                 ws_url,
                 generation,
                 source: ChromeSource::Launched,
                 pid: Some(pid),
+                provider: BrowserProviderKind::Managed,
                 child: Some(child),
             });
         }
@@ -195,6 +215,24 @@ pub async fn ensure(config: &Config) -> AbResult<ChromeHandle> {
         }
         sleep(Duration::from_millis(100)).await;
     }
+}
+
+fn connect_external(web_socket_url: &str) -> AbResult<ChromeHandle> {
+    if !web_socket_url.starts_with("ws://") && !web_socket_url.starts_with("wss://") {
+        return Err(AbError::new(
+            "configuration_error",
+            "chrome.external.endpoint",
+            "external Chrome endpoint must use ws:// or wss://",
+        ));
+    }
+    Ok(ChromeHandle {
+        ws_url: web_socket_url.to_owned(),
+        generation: format!("external-{:x}", Sha256::digest(web_socket_url.as_bytes())),
+        source: ChromeSource::External,
+        pid: None,
+        provider: BrowserProviderKind::External,
+        child: None,
+    })
 }
 
 fn verify_marker(path: &Path) -> AbResult<()> {

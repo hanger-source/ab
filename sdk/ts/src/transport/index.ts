@@ -22,6 +22,7 @@ import {
   type RuntimeStartupState,
 } from "../runtime/native.js";
 import { socketPath } from "../runtime/paths.js";
+import type { BrowserProvider } from "../options.js";
 
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const MAX_RESOURCE_BACKLOG = 4096;
@@ -71,12 +72,16 @@ export class ProtocolClient {
     socket.unref();
   }
 
-  static async connect(timeoutMs = 30_000, signal?: AbortSignal): Promise<ProtocolClient> {
-    const path = socketPath();
+  static async connect(
+    provider: BrowserProvider,
+    timeoutMs = 30_000,
+    signal?: AbortSignal,
+  ): Promise<ProtocolClient> {
+    const path = socketPath(provider);
     const deadline = Date.now() + timeoutMs;
     let socket: Socket;
     if (!existsSync(path)) {
-      socket = await launchAndWaitForSocket(path, deadline, signal);
+      socket = await launchAndWaitForSocket(provider, path, deadline, signal);
     } else {
       try {
         socket = await openSocket(path);
@@ -84,7 +89,7 @@ export class ProtocolClient {
         if (!isRecoverableConnectError(error)) {
           throw error;
         }
-        socket = await launchAndWaitForSocket(path, deadline, signal);
+        socket = await launchAndWaitForSocket(provider, path, deadline, signal);
       }
     }
     let ready: ClientReady;
@@ -96,7 +101,7 @@ export class ProtocolClient {
         throw error;
       }
       await waitForDaemonRelease(path, remainingTimeout(deadline), signal);
-      socket = await launchAndWaitForSocket(path, deadline, signal);
+      socket = await launchAndWaitForSocket(provider, path, deadline, signal);
       try {
         ready = await handshake(socket, remainingTimeout(deadline), signal);
       } catch (retryError) {
@@ -547,15 +552,22 @@ function openSocket(path: string, signal?: AbortSignal): Promise<Socket> {
 }
 
 async function launchAndWaitForSocket(
+  provider: BrowserProvider,
   path: string,
   deadline: number,
   signal?: AbortSignal,
 ): Promise<Socket> {
-  const baseline = await readRuntimeStartupState();
+  const baseline = await readRuntimeStartupState(provider);
   const binary = await resolveRuntimeBinary();
-  launchRuntime(binary);
-  const startup = await waitForRuntimeReady(baseline?.startupId ?? null, deadline, signal);
+  launchRuntime(binary, provider);
+  const startup = await waitForRuntimeReady(
+    provider,
+    baseline?.startupId ?? null,
+    deadline,
+    signal,
+  );
   return waitForSocket(
+    provider,
     path,
     remainingTimeout(deadline),
     signal,
@@ -564,6 +576,7 @@ async function launchAndWaitForSocket(
 }
 
 async function waitForRuntimeReady(
+  provider: BrowserProvider,
   baselineStartupId: string | null,
   deadline: number,
   signal?: AbortSignal,
@@ -576,7 +589,7 @@ async function waitForRuntimeReady(
         message: "AB startup wait was cancelled",
       });
     }
-    const state = await readRuntimeStartupState();
+    const state = await readRuntimeStartupState(provider);
     if (state && state.startupId !== baselineStartupId) {
       if (state.state === "failed" && state.error) {
         throw new ABError(state.error);
@@ -595,6 +608,7 @@ async function waitForRuntimeReady(
 }
 
 async function waitForSocket(
+  provider: BrowserProvider,
   path: string,
   timeoutMs: number,
   signal?: AbortSignal,
@@ -617,11 +631,11 @@ async function waitForSocket(
       if (!isRecoverableConnectError(error)) {
         throw error;
       }
-      await throwNewStartupFailure(startupBaseline);
+      await throwNewStartupFailure(provider, startupBaseline);
       await delay(50);
     }
   }
-  await throwNewStartupFailure(startupBaseline);
+  await throwNewStartupFailure(provider, startupBaseline);
   throw new ABError({
     kind: "daemon_start_timeout",
     stage: "sdk.socket.wait",
@@ -630,8 +644,11 @@ async function waitForSocket(
   });
 }
 
-async function throwNewStartupFailure(baseline: string | null): Promise<void> {
-  const state = await readRuntimeStartupState();
+async function throwNewStartupFailure(
+  provider: BrowserProvider,
+  baseline: string | null,
+): Promise<void> {
+  const state = await readRuntimeStartupState(provider);
   if (
     state?.state === "failed"
     && state.error

@@ -3,6 +3,7 @@ import { type BrowserIdentity, type NavigateOptions, type ScreenshotOptions } fr
 import type { Screenshot } from "../artifacts/index.js";
 import type { Diagnostics } from "../diagnostics/index.js";
 import type { OperationOptions } from "../options.js";
+import type { BrowserProvider } from "../options.js";
 import { AX } from "./ax.js";
 import { CUA } from "./cua.js";
 import { Dev } from "./dev.js";
@@ -14,6 +15,7 @@ export type ConnectOptions = {
     timeoutMs?: number;
     signal?: AbortSignal;
     presenter?: Presenter;
+    provider?: BrowserProvider;
 };
 export type PopupExpectationOptions = OperationOptions;
 /** Explicit Agent-facing tab with capability namespaces instead of Core forwarding. */

@@ -1,5 +1,6 @@
 use super::init_scripts::{InitScriptDefinition, InitScriptInstance, InitScriptSubscription};
 use super::owner::BrowserOwner;
+use super::provider::{BrowserProviderKind, BrowserTarget};
 use super::session_manager::{DialogLifecycle, FrameState, RealmState};
 use super::target_lane::TargetState;
 use super::target_leases::TargetOwnership;
@@ -241,8 +242,9 @@ impl BrowserCore {
         ws_url: &str,
         generation: String,
         artifacts: Arc<ArtifactStore>,
+        provider_kind: BrowserProviderKind,
     ) -> AbResult<Self> {
-        let owner = BrowserOwner::connect(ws_url).await?;
+        let owner = BrowserOwner::connect(ws_url, provider_kind).await?;
         let client = owner.sessions().client();
         Ok(Self {
             observations: ObservationStore::new(Arc::clone(&client)),
@@ -258,17 +260,11 @@ impl BrowserCore {
     }
 
     pub async fn list_tabs(&self, client_id: &str) -> AbResult<Vec<TabInfo>> {
-        let sessions = self.owner.sessions();
-        let tabs = sessions.tabs().await;
-        let active_target_ids = sessions.active_target_ids(&tabs).await;
+        let tabs = self.owner.list_targets().await?;
         let mut infos = Vec::with_capacity(tabs.len());
         for target in tabs {
-            let active = active_target_ids.contains(&target.target_id);
-            let ownership = self
-                .owner
-                .target_ownership(client_id, &target.target_id)
-                .await;
-            infos.push(tab_info(target, active, ownership));
+            let ownership = self.owner.target_ownership(client_id, &target.id).await;
+            infos.push(tab_info(target, ownership));
         }
         Ok(infos)
     }
@@ -293,11 +289,9 @@ impl BrowserCore {
     }
 
     pub async fn get_tab(&self, client_id: &str, target_id: &str) -> AbResult<TabInfo> {
-        let sessions = self.owner.sessions();
-        let target = sessions.target(target_id).await?;
-        let active = sessions.target_is_active(&target).await;
+        let target = self.owner.target(target_id).await?;
         let ownership = self.owner.target_ownership(client_id, target_id).await;
-        Ok(tab_info(target, active, ownership))
+        Ok(tab_info(target, ownership))
     }
 
     pub async fn acquire_tab(&self, client_id: &str, target_id: &str) -> AbResult<TabInfo> {
@@ -2207,18 +2201,14 @@ fn action_diagnostic(action: &str, stage: &str, elapsed_ms: u128) {
     }
 }
 
-fn tab_info(
-    target: super::session_manager::TargetSession,
-    active: bool,
-    ownership: TargetOwnership,
-) -> TabInfo {
+fn tab_info(target: BrowserTarget, ownership: TargetOwnership) -> TabInfo {
     TabInfo {
-        id: target.target_id,
+        id: target.id,
         opener_id: target.opener_id,
         title: target.title,
         url: target.url,
-        kind: target.target_type,
-        active,
+        kind: target.kind,
+        active: target.active,
         ownership,
         engine_id: "ab".to_owned(),
         label: None,

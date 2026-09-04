@@ -1,9 +1,10 @@
 import { Browser } from "./browser/index.js";
+import type { ConnectOptions } from "./options.js";
 export { ABError, type ABErrorData } from "./errors/index.js";
 export { Diagnostics, type TraceEvent, type TraceFilter, type TraceSnapshot, } from "./diagnostics/index.js";
 export { Artifact, Screenshot, type ArtifactDescriptor, type CssViewport, type ScreenshotScale, type ScreenshotWire, } from "./artifacts/index.js";
 export { ElementHandle, type ElementActionOptions, type ElementBounds, type ElementHandleDescriptor, type ElementInspection, type ElementInspectionOptions, type ElementInspectionRequest, } from "./elements/index.js";
-export type { OperationOptions } from "./options.js";
+export type { BrowserProvider, ConnectOptions, OperationOptions } from "./options.js";
 export { ConsoleObserver, Dialog, DialogWatcher, Download, DownloadWatcher, FileChooserWatcher, InitScriptRegistration, NetworkObserver, PopupWatcher, Resource, type BrowserEvent, type DialogInfo, type DownloadInfo, type DownloadState, type NetworkBody, type NetworkBodyOptions, type NetworkObserverOptions, type PopupInfo, type ResourceState, type InitScriptDefinition, type InitScriptFrames, type InitScriptInstance, type InitScriptWorld, type ResourceDescriptor, type ResourceKind, type ResourceLifecycleState, type ResourceScope, } from "./resources/index.js";
 export { CUA, type CuaActionData, type CuaClickOptions, type CuaDragOptions, type CuaPoint, type CuaWheelOptions, } from "./actions/cua.js";
 export type { ActionCoordinateIdentity, ActionDialog, ActionOptions, ActionObservationOutcome, ActionObservationOptions, ActionClosedTarget, ActionOpenedTarget, ActionResult, ActionSource, ActionTargetChanges, ActionTargetIdentity, ActionTiming, DocumentChange, NavigationChange, TextInputActionData, TextInputFieldOutcome, } from "./actions/result.js";
@@ -17,8 +18,5 @@ export { Browser, CDPSession, Frame, Realm, Tab, Tabs, type BrowserIdentity, typ
  * listening, it launches the exact native runtime shipped with this SDK and
  * waits for the same handshake. Repeated calls in one process share a client.
  */
-export declare function connect(options?: {
-    timeoutMs?: number;
-    signal?: AbortSignal;
-}): Promise<Browser>;
+export declare function connect(options?: ConnectOptions): Promise<Browser>;
 //# sourceMappingURL=index.d.ts.map

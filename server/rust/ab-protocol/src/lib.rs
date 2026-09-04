@@ -77,6 +77,7 @@ pub struct ClientHello {
 pub enum ChromeSource {
     Launched,
     Reattached,
+    External,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]

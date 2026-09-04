@@ -32,7 +32,7 @@ The runtime cannot infer user intent from a button label. Observe the surroundin
 
 ## Secrets and authentication
 
-Do not print passwords, tokens, cookies, or full sensitive form values into AX output, logs, filenames, or source strings. Prefer the already-authenticated fixed profile. When credentials or a one-time code must be entered, use only values the user has made available for that task and do not persist copies in helper files.
+Do not print passwords, tokens, cookies, or full sensitive form values into AX output, logs, filenames, or source strings. Prefer authentication already present in the explicitly selected browser provider. When credentials or a one-time code must be entered, use only values the user has made available for that task and do not persist copies in helper files.
 
 Do not use `evaluate()` or CDP to extract unrelated cookies, storage, password-manager state, or authentication tokens. The fact that the browser can access something does not make it in scope.
 

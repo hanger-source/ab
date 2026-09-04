@@ -32,7 +32,7 @@ export type BrowserIdentity = {
   daemonId: string;
   browserGeneration: string;
   chrome: {
-    source: "launched" | "reattached";
+    source: "launched" | "reattached" | "external";
     pid: number | null;
   };
 };

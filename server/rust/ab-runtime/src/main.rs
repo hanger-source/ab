@@ -91,7 +91,7 @@ async fn run_owned(config: &Config, startup: &startup::StartupAttempt) -> AbResu
         },
     )?;
 
-    let chrome = match chrome::ensure(config).await {
+    let chrome = match chrome::connect(&config.browser_provider, &config.logs_dir).await {
         Ok(chrome) => chrome,
         Err(error) => {
             append_daemon_log(config, &format!("startupError={error}"));
@@ -115,6 +115,7 @@ async fn run_owned(config: &Config, startup: &startup::StartupAttempt) -> AbResu
         &chrome.ws_url,
         chrome.generation.clone(),
         Arc::clone(&artifacts),
+        chrome.provider,
     )
     .await
     {

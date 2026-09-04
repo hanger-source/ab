@@ -1,4 +1,5 @@
 import { type ClientReady, type RequestTarget, type ResourceClosed, type ResourceEvent, type Stage } from "../protocol.js";
+import type { BrowserProvider } from "../options.js";
 type TraceFilter = {
     traceId?: string;
     requestId?: string;
@@ -12,7 +13,7 @@ export declare class ProtocolClient {
     #private;
     readonly ready: ClientReady;
     private constructor();
-    static connect(timeoutMs?: number, signal?: AbortSignal): Promise<ProtocolClient>;
+    static connect(provider: BrowserProvider, timeoutMs?: number, signal?: AbortSignal): Promise<ProtocolClient>;
     get connected(): boolean;
     onClose(callback: () => void): void;
     subscribeResource(resourceId: string, listener: (message: ResourceMessage) => void): () => void;

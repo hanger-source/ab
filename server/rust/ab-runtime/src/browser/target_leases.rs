@@ -92,20 +92,21 @@ impl TargetLeases {
         }
     }
 
-    pub async fn release_client(&self, client_id: &str) {
+    pub async fn release_client(&self, client_id: &str) -> Vec<String> {
         let mut owners = self.owners.lock().await;
         let targets = owners
             .iter()
             .filter(|(_, owner)| owner.as_str() == client_id)
             .map(|(target_id, _)| target_id.clone())
             .collect::<Vec<_>>();
-        for target_id in targets {
-            owners.remove(&target_id);
+        for target_id in &targets {
+            owners.remove(target_id);
             eprintln!(
                 "[ab.target] lease=released client_id={} target_id={} reason=client_disconnected",
                 client_id, target_id
             );
         }
+        targets
     }
 }
 

@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/%40hanger-source%2Fab)](https://www.npmjs.com/package/@hanger-source/ab)
 [![skills.sh](https://skills.sh/b/hanger-source/ab)](https://skills.sh/hanger-source/ab)
 
-AB（Agent Browser）是面向 Agent 的本地浏览器运行时。它由隐藏的原生 Rust daemon 管理一份专用、固定、持久的 headed Chrome；TypeScript SDK 把 CDP 的 target、frame、document、AX、DOM、输入与事件组织成稳定对象；Codex-style Skill 规定 Agent 如何观察、定位、动作和验证。
+AB（Agent Browser）是面向 Agent 的本地浏览器运行时。默认 provider 由隐藏的原生 Rust daemon 管理一份专用、固定、持久的 headed Chrome；显式 external provider 可以连接已经开启远程调试的用户 Chrome。TypeScript SDK 把两种来源的 CDP target、frame、document、AX、DOM、输入与事件组织成同一套稳定对象；Codex-style Skill 规定 Agent 如何观察、定位、动作和验证。
 
 ```text
 Agent --reads--> skills/ab
@@ -16,11 +16,12 @@ Agent --reads--> skills/ab
   -> ab-runtime (Rust daemon)
   -> agent-browser engine (linked Rust source)
   -> CDP
-  -> headed Google Chrome
-  -> ~/Library/Application Support/ab/chrome-profile
+  -> BrowserProvider
+       - managed -> headed Google Chrome -> AB chrome-profile
+       - external -> explicit browser-level DevTools endpoint
 ```
 
-Node REPL MCP 只管理 Agent 的 JavaScript cell、变量和标准 MCP 文本/图片输出；它不连接 CDP，也不拥有浏览器状态。Codex 直接使用宿主已经提供的 `node_repl`，不启动第二个 Qwen 进程；其他 Agent host 使用标准 MCP 配置启动仓库中的 Qwen `node-repl-mcp`。两条路径进入同一 `@hanger-source/ab/agent` API。第一次 `connect()` 会尝试连接当前用户的固定 Unix socket；daemon 不存在时，SDK 自动拉起 `ab-runtime`，由它启动专用 Chrome。后续独立 Agent/Node 任务复用同一个 daemon、Chrome、tab 与登录状态，不需要扩展、手工 Chrome 参数或 server 管理命令。
+Node REPL MCP 只管理 Agent 的 JavaScript cell、变量和标准 MCP 文本/图片输出；它不连接 CDP，也不拥有浏览器状态。Codex 直接使用宿主已经提供的 `node_repl`，不启动第二个 Qwen 进程；其他 Agent host 使用标准 MCP 配置启动仓库中的 Qwen `node-repl-mcp`。两条路径进入同一 `@hanger-source/ab/agent` API。默认 `connect()` 使用 managed provider 和固定 Unix socket；external provider 根据 endpoint origin 使用独立 socket。两种模式都不需要扩展或 server 管理命令。
 
 ## 安装
 
@@ -70,6 +71,19 @@ try {
 }
 ```
 
+显式连接用户 Chrome：
+
+```ts
+const browser = await connect({
+  provider: {
+    kind: "external",
+    webSocketUrl: "ws://127.0.0.1:9222/devtools/browser/<browser-id>",
+  },
+});
+```
+
+External 的 `tabs.list()` 只发现，不 attach 全部用户 tab；调用 `tabs.acquire(targetId)` 后，目标页面才进入标准 `Tab` 能力链。断开 client 会 detach 已领取 session，不关闭用户 tab 或 Chrome。
+
 `tabs.list/get` 只发现共享 Chrome 中的页面。`tabs.open()` 原子拥有新 target；复用现有页面前用 `tabs.acquire(targetId)` 取得当前 client 的修改租约。另一个活跃 client 已持有时明确返回 `target_in_use`，不会抢占或切换到相似页面。`browser.disconnect()` 释放当前 SDK client 的 target 租约、observer、CDPSession、ElementHandle、observation 等临时资源，不关闭 daemon、Chrome 或其他 client。页面只有在持有租约并调用 `tab.close()` 时才关闭。
 
 ## Agent 操作面
@@ -96,7 +110,7 @@ try {
 
 `agent-browser` 是 runtime 内唯一底层引擎源码基底；Codex Browser 是 Agent UX 基准；browser-harness 只提供组合体验参考。AB 不运行这三个项目各自的 CLI、daemon、私有 Browser Runtime 或 helper 系统。
 
-不存在浏览器扩展、Python relay、Node Browser Server、WASM build、Playwright runtime、server 管理 CLI、临时 profile、用户日常 Chrome 接管或旧链路 fallback。Node REPL MCP 是 Agent host adapter，不是浏览器 Server。
+不存在浏览器扩展、Python relay、Node Browser Server、WASM build、Playwright runtime、server 管理 CLI、临时 profile、隐式用户 Chrome 接管或旧链路 fallback。Node REPL MCP 是 Agent host adapter，不是浏览器 Server。
 
 ## 文档
 
@@ -106,6 +120,7 @@ try {
 - [实施计划](docs/plans/20260810__ab-implementation__@hanger.md)
 - [SDK 组合模式](docs/guides/20260810__ab-sdk-composition-patterns__@hanger.md)
 - [发布与分发](docs/guides/20260901__ab-release-and-distribution__@hanger.md)
+- [Browser Provider 与用户 Chrome](docs/guides/20260903__browser-provider-and-user-chrome__@codex.md)
 - [源码研究入口](docs/references/README.md)
 
 ## 项目信息

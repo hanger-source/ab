@@ -1,8 +1,10 @@
 # Authentication and persistent profile
 
-AB launches one dedicated headed Chrome with one fixed profile at `~/Library/Application Support/ab/chrome-profile`. Cookies, local storage, IndexedDB, service workers, and ordinary site sessions persist across Node processes and Agent tasks.
+The default managed provider launches one dedicated headed Chrome with one fixed profile at `~/Library/Application Support/ab/chrome-profile`. Cookies, local storage, IndexedDB, service workers, and ordinary site sessions persist across Node processes and Agent tasks.
 
-This is not the user's everyday Chrome profile. AB does not copy credentials from another browser, attach to an arbitrary existing Chrome, or silently switch to a temporary profile.
+This is not the user's everyday Chrome profile. AB does not copy credentials from another browser or silently switch to a temporary profile.
+
+When the user explicitly asks to use an already-running Chrome, connect its exact browser-level DevTools endpoint with the external provider. AB then uses the login state already present in that Chrome. Listing tabs does not attach them; acquire only the exact tab required by the task. External disconnect detaches AB sessions without closing user tabs, signing out, or shutting down Chrome.
 
 ## Reuse an existing login
 
@@ -33,7 +35,7 @@ AX observations describe web content, not arbitrary Chrome toolbar or password-m
 
 ## Authentication state boundaries
 
-The fixed profile makes state durable, not universal:
+Browser authentication state is durable within the selected profile, not universal:
 
 - private/incognito state is not part of the AB contract;
 - origin storage remains origin-scoped;

@@ -1,3 +1,4 @@
+use super::provider::{BrowserProvider, BrowserProviderKind, BrowserTarget};
 use super::session_manager::SessionManager;
 use super::target_lane::{TargetLane, TargetState};
 use super::target_leases::{TargetLeases, TargetOwnership};
@@ -14,7 +15,7 @@ struct LaneRegistry {
 }
 
 pub struct BrowserOwner {
-    sessions: Arc<SessionManager>,
+    provider: BrowserProvider,
     lanes: Mutex<LaneRegistry>,
     input_surface: Arc<Mutex<()>>,
     target_leases: TargetLeases,
@@ -22,10 +23,10 @@ pub struct BrowserOwner {
 }
 
 impl BrowserOwner {
-    pub async fn connect(ws_url: &str) -> AbResult<Arc<Self>> {
-        let sessions = SessionManager::connect(ws_url).await?;
+    pub async fn connect(ws_url: &str, provider_kind: BrowserProviderKind) -> AbResult<Arc<Self>> {
+        let provider = BrowserProvider::connect(ws_url, provider_kind).await?;
         let owner = Arc::new(Self {
-            sessions,
+            provider,
             lanes: Mutex::new(LaneRegistry::default()),
             input_surface: Arc::new(Mutex::new(())),
             target_leases: TargetLeases::default(),
@@ -36,11 +37,19 @@ impl BrowserOwner {
     }
 
     pub fn sessions(&self) -> Arc<SessionManager> {
-        Arc::clone(&self.sessions)
+        self.provider.sessions()
     }
 
     pub fn subscribe_disconnected(&self) -> watch::Receiver<bool> {
-        self.sessions.subscribe_disconnected()
+        self.sessions().subscribe_disconnected()
+    }
+
+    pub async fn list_targets(&self) -> AbResult<Vec<BrowserTarget>> {
+        self.provider.list_targets().await
+    }
+
+    pub async fn target(&self, target_id: &str) -> AbResult<BrowserTarget> {
+        self.provider.target(target_id).await
     }
 
     pub async fn open_target(
@@ -48,7 +57,7 @@ impl BrowserOwner {
         client_id: &str,
     ) -> AbResult<super::session_manager::TargetSession> {
         let _gate = self.target_lease_gate.lock().await;
-        let target = self.sessions.open_tab("about:blank").await?;
+        let target = self.provider.open_target("about:blank").await?;
         self.target_leases
             .acquire(client_id, &target.target_id)
             .await?;
@@ -57,7 +66,8 @@ impl BrowserOwner {
 
     pub async fn acquire_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
         let _gate = self.target_lease_gate.lock().await;
-        let target = self.sessions.target(target_id).await?;
+        let target = self.provider.acquire_target(target_id).await?;
+        self.lanes.lock().await.unavailable.remove(target_id);
         if let Some(opener_id) = target.opener_id.as_deref() {
             self.target_leases.inherit(opener_id, target_id).await;
         }
@@ -65,7 +75,7 @@ impl BrowserOwner {
     }
 
     pub async fn require_target(&self, client_id: &str, target_id: &str) -> AbResult<()> {
-        let target = self.sessions.target(target_id).await?;
+        let target = self.sessions().target(target_id).await?;
         if let Some(opener_id) = target.opener_id.as_deref() {
             self.target_leases.inherit(opener_id, target_id).await;
         }
@@ -86,11 +96,18 @@ impl BrowserOwner {
     }
 
     pub async fn cleanup_client(&self, client_id: &str) {
-        self.target_leases.release_client(client_id).await;
+        for target_id in self.target_leases.release_client(client_id).await {
+            if let Err(error) = self.provider.release_target(&target_id).await {
+                eprintln!(
+                    "[ab.provider] release_failed client_id={} target_id={} error={error}",
+                    client_id, target_id
+                );
+            }
+        }
     }
 
     pub async fn lock_target(&self, target_id: &str) -> AbResult<OwnedMutexGuard<TargetState>> {
-        if let Some(dialog) = self.sessions.dialog_for_target(target_id).await {
+        if let Some(dialog) = self.sessions().dialog_for_target(target_id).await {
             return Err(dialog_blocked(target_id, &dialog));
         }
         self.lock_target_inner(target_id, false).await
@@ -111,8 +128,8 @@ impl BrowserOwner {
     /// `docs/evidence/20260902__action-resource-ownership__@codex.md`.
     pub async fn lock_input_surface(&self, target_id: &str) -> AbResult<OwnedMutexGuard<()>> {
         let guard = Arc::clone(&self.input_surface).lock_owned().await;
-        self.sessions.target(target_id).await?;
-        self.sessions
+        self.sessions().target(target_id).await?;
+        self.sessions()
             .client()
             .send_command(
                 "Target.activateTarget",
@@ -135,7 +152,7 @@ impl BrowserOwner {
         target_id: &str,
         allow_dialog: bool,
     ) -> AbResult<OwnedMutexGuard<TargetState>> {
-        self.sessions.target(target_id).await?;
+        self.sessions().target(target_id).await?;
         let lane = {
             let mut registry = self.lanes.lock().await;
             if registry.unavailable.contains(target_id) {
@@ -153,7 +170,7 @@ impl BrowserOwner {
             return Err(target_gone(target_id));
         }
         if !allow_dialog {
-            if let Some(dialog) = self.sessions.dialog_for_target(target_id).await {
+            if let Some(dialog) = self.sessions().dialog_for_target(target_id).await {
                 drop(guard);
                 return Err(dialog_blocked(target_id, &dialog));
             }
@@ -173,14 +190,14 @@ impl BrowserOwner {
         } else {
             None
         };
-        self.sessions.close_tab(target_id).await?;
+        self.sessions().close_tab(target_id).await?;
         self.lanes.lock().await.lanes.remove(target_id);
         Ok(())
     }
 
     fn spawn_target_lifecycle(self: &Arc<Self>) {
         let owner = Arc::clone(self);
-        let mut lifecycle = self.sessions.subscribe_lifecycle();
+        let mut lifecycle = self.sessions().subscribe_lifecycle();
         tokio::spawn(async move {
             loop {
                 match lifecycle.recv().await {
