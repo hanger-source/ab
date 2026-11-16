@@ -29,17 +29,17 @@
     },
     "sdk/native/darwin-arm64": {
       "name": "@hanger-source/ab-runtime-darwin-arm64",
-      "version": "0.3.0-alpha.1",
+      "version": "0.3.0-rc.3",
     },
     "sdk/ts": {
       "name": "@hanger-source/ab",
-      "version": "0.3.0-alpha.1",
+      "version": "0.3.0-rc.3",
       "devDependencies": {
         "@types/node": "^22.15.0",
         "typescript": "^5.9.0",
       },
       "optionalDependencies": {
-        "@hanger-source/ab-runtime-darwin-arm64": "0.3.0-alpha.1",
+        "@hanger-source/ab-runtime-darwin-arm64": "0.3.0-rc.3",
       },
     },
   },

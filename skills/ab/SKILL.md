@@ -4,7 +4,7 @@ description: "Connect to the user's running Google Chrome without an address, or
 license: Apache-2.0
 metadata:
   author: hanger
-  version: "0.3.0-rc.2"
+  version: "0.3.0-rc.3"
   repository: https://github.com/hanger-source/ab
   compatibility: macOS arm64, Node.js 20 or later, and Google Chrome
 ---
