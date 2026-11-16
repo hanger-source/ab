@@ -22,7 +22,7 @@ import {
   type RuntimeStartupState,
 } from "../runtime/native.js";
 import { socketPath } from "../runtime/paths.js";
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "../runtime/provider.js";
 
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const MAX_RESOURCE_BACKLOG = 4096;

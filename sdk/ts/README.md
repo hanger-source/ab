@@ -14,7 +14,13 @@ const state = await tab.ax.write("state");
 await tab.playwright.getByRole("button", { name: "Continue", exact: true }).click();
 ```
 
-Import `@hanger-source/ab` for the explicit Core SDK and `@hanger-source/ab/agent` for Agent presentation and short-ref ergonomics. Both use the same version-matched Rust runtime. The default managed provider owns AB's fixed Chrome profile; an explicit external provider connects a supplied browser-level DevTools WebSocket endpoint:
+Import `@hanger-source/ab` for the explicit Core SDK and `@hanger-source/ab/agent` for Agent presentation and short-ref ergonomics. Both use the same version-matched Rust runtime. To connect the current user's running regular Google Chrome on macOS without an address:
+
+```js
+const browser = await connect({ provider: { kind: "user" }, timeoutMs: 60_000 });
+```
+
+Enable remote debugging in Chrome 144+ at `chrome://inspect/#remote-debugging` and allow Chrome's connection prompt. AB excludes its managed and custom-profile instances; absent or ambiguous debugging listeners fail explicitly. The default managed provider owns AB's fixed Chrome profile; an explicit external provider connects a caller-supplied browser-level DevTools WebSocket endpoint:
 
 ```js
 const browser = await connect({

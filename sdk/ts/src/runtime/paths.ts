@@ -1,6 +1,6 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "./provider.js";
 import { providerEndpointKey } from "./provider.js";
 
 export function runtimeDirectory(provider: BrowserProvider): string {

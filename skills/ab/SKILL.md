@@ -1,6 +1,6 @@
 ---
 name: ab
-description: "Control AB's persistent headed Chrome through the version-matched @hanger-source/ab/agent Node.js ESM API. Use for rendered UI, signed-in pages, AX state and refs, semantic locators, visual input, and browser-only diagnostics or events."
+description: "Connect to the user's running Google Chrome without an address, or use AB's dedicated persistent Chrome. Use for browser UI, signed-in pages, AX, semantic locators, visual input, and browser events."
 license: Apache-2.0
 metadata:
   author: hanger
@@ -11,7 +11,25 @@ metadata:
 
 # AB browser
 
-AB is a local browser runtime for Agents. By default, `connect()` reuses one hidden Rust daemon, one headed Chrome, and one fixed persistent profile across Node.js processes and Agent tasks. When the user explicitly asks to use their Chrome, `connect({ provider: { kind: "external", webSocketUrl } })` connects its browser-level DevTools endpoint without an extension and keeps that runtime separate from the managed browser. There is no Playwright process, browser CLI, status command, Bun requirement, or OpenAI API key.
+AB is a local browser runtime for Agents. When the user says “connect to my Chrome”, “use my browser”, “连我的 Chrome”, or asks to use an existing personal browser session, use `connect({ provider: { kind: "user" } })`. AB discovers the running Chrome itself; the Agent does not need an address. This mode never launches Chrome. Bare `connect()` uses AB's separate, dedicated persistent Chrome. Choose the browser before the first connection.
+
+## Connect to the requested Chrome
+
+Import the client from the absolute directory containing this `SKILL.md`. For the user's Chrome, run:
+
+```ts
+const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
+const browser = await connect({ provider: { kind: "user" }, timeoutMs: 60_000 });
+let tabs = await browser.tabs.list();
+```
+
+Before connecting, tell the user that Chrome may ask them to allow remote debugging. Run this in the persistent JavaScript Tool described below, with an outer `timeout_ms` of at least `90_000`. If the cell yields, wait on that same cell; do not start another connection.
+
+AB selects the current user's regular Google Chrome on macOS, excluding AB's dedicated and custom-profile instances. It discovers Chrome's own loopback listener and handles both Chrome's approval mode and a conventional remote-debugging server. Chrome 144+ can enable approval mode at `chrome://inspect/#remote-debugging` without restarting Chrome. An HTTP 404 from `/json/version` is expected in approval mode; it does not mean an enterprise proxy blocked Chrome.
+
+If AB reports `user_chrome_debugging_disabled`, ask the user to enable remote debugging at that Chrome page, then connect again. If Chrome displays “Allow remote debugging?”, let the user approve the pending connection. A rejection, timeout, unavailable Chrome, or ambiguous browser is a connection failure to report with AB's exact reason. Do not change to managed, restart Chrome, inspect protected profile files, ask for full disk access, or research WebSocket addresses. Read [bootstrap](references/bootstrap.md) for connection errors and explicit endpoint use.
+
+After connecting, list tabs and acquire only the exact target needed by the task. Discovery does not attach every user tab. Disconnecting releases acquired sessions without closing user tabs or Chrome.
 
 ## Choose the browser only for browser work
 
@@ -23,7 +41,7 @@ Before navigation, tab activation, clicks, typing, file selection, dialog respon
 
 For authentication, consequential actions, uploads, or unfamiliar external content, read [safety](references/safety.md) and the applicable task reference before acting. Persistent login state does not expand the user's authorization.
 
-## Keep one managed JavaScript session alive
+## Keep one persistent JavaScript session alive
 
 For interactive work, use one persistent Node REPL MCP execution tool. In Codex, use the built-in `mcp__node_repl__js`/`node_repl` Tool already supplied by the host; do not start or register AB's Qwen copy beside it. In another Agent host, reuse its configured compatible persistent Node REPL; when the host has none, configure the Apache-2.0 Qwen `node-repl-mcp` before this Skill runs. The Skill never installs, starts, or registers an MCP server during a browser task. Read [bootstrap](references/bootstrap.md) only when selecting or configuring the host.
 
@@ -33,21 +51,15 @@ This is one code-composition Tool, not a menu of browser actions. Keep `browser`
 
 Import the Skill client by its absolute path. Derive `<ab-skill-root>` from the directory containing this `SKILL.md`; do not substitute an npm package name, project source path, or guessed `.d.ts` path.
 
-```ts
-const { connect } = await import("<ab-skill-root>/scripts/ab-client.mjs");
-const browser = await connect();
-let tabs = await browser.tabs.list();
-```
-
-Choose the provider once, before connecting. Use the default managed provider unless the user explicitly asks for an already-running Chrome and its browser-level WebSocket endpoint is available. For that case:
+Only when the task calls for AB's dedicated persistent browser, connect with the managed provider:
 
 ```ts
 const browser = await connect({
-  provider: { kind: "external", webSocketUrl },
+  provider: { kind: "managed" },
 });
 ```
 
-External discovery does not attach every user tab. List first, then acquire the exact target needed by the task. Do not switch providers, guess another endpoint, or fall back to managed Chrome inside the same JavaScript session. Read [bootstrap](references/bootstrap.md) for endpoint and lifecycle details.
+With no browser preference, bare `connect()` selects managed. An explicit request for the user's Chrome always selects `user`, even when debugging is not yet enabled. When the user supplies a specific remote WebSocket endpoint, use `external` as documented in [bootstrap](references/bootstrap.md). Never guess an endpoint or substitute a different browser. One JavaScript process must disconnect before changing providers.
 
 If `scripts/ab-client.mjs` or its packaged runtime is absent, stop and report that the AB Skill installation is incomplete. Do not search the project or npm installation for another copy.
 

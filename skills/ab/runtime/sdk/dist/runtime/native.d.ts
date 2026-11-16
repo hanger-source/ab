@@ -1,5 +1,5 @@
 import type { ABErrorData } from "../errors/index.js";
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "./provider.js";
 export type RuntimeStartupState = {
     startupId: string;
     state: "starting" | "ready" | "failed";

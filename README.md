@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/%40hanger-source%2Fab)](https://www.npmjs.com/package/@hanger-source/ab)
 [![skills.sh](https://skills.sh/b/hanger-source/ab)](https://skills.sh/hanger-source/ab)
 
-AB（Agent Browser）是面向 Agent 的本地浏览器运行时。默认 provider 由隐藏的原生 Rust daemon 管理一份专用、固定、持久的 headed Chrome；显式 external provider 可以连接已经开启远程调试的用户 Chrome。TypeScript SDK 把两种来源的 CDP target、frame、document、AX、DOM、输入与事件组织成同一套稳定对象；Codex-style Skill 规定 Agent 如何观察、定位、动作和验证。
+AB（Agent Browser）是面向 Agent 的本地浏览器运行时。`user` provider 自动发现并连接当前用户正在使用的 Google Chrome，无需提供地址，也不会另开 Chrome；默认 managed provider 管理一份专用、固定、持久的 headed Chrome；external provider 连接调用方指定的调试地址。TypeScript SDK 把这些来源的 CDP target、frame、document、AX、DOM、输入与事件组织成同一套稳定对象；Codex-style Skill 规定 Agent 如何观察、定位、动作和验证。
 
 ```text
 Agent --reads--> skills/ab
@@ -17,6 +17,7 @@ Agent --reads--> skills/ab
   -> agent-browser engine (linked Rust source)
   -> CDP
   -> BrowserProvider
+       - user -> running personal Google Chrome (automatic discovery)
        - managed -> headed Google Chrome -> AB chrome-profile
        - external -> explicit browser-level DevTools endpoint
 ```
@@ -71,7 +72,16 @@ try {
 }
 ```
 
-显式连接用户 Chrome：
+连接正在使用的 Chrome（macOS）：
+
+```ts
+const browser = await connect({ provider: { kind: "user" }, timeoutMs: 60_000 });
+const tabs = await browser.tabs.list();
+```
+
+在 Chrome 144+ 中，通过 `chrome://inspect/#remote-debugging` 开启远程调试，无需重启。连接时 Chrome 可能询问是否允许调试，由用户批准。AB 自动识别当前用户的常规 Chrome 进程及其调试监听，排除 AB 专用和自定义 profile 的实例；不需要读取受保护的 profile 文件或手工提供 browser-id。未开启调试、拒绝授权或目标有歧义时，连接明确失败，不启动其他 Chrome。
+
+调用方提供特定浏览器地址时使用 external：
 
 ```ts
 const browser = await connect({

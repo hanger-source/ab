@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 import type { BrowserProvider } from "../options.js";
 
+/** A concrete endpoint or AB-owned browser, ready for the native transport. */
+export type ResolvedBrowserProvider = Exclude<BrowserProvider, { kind: "user" }>;
+
 const MANAGED_PROVIDER: BrowserProvider = { kind: "managed" };
 
 export function normalizeBrowserProvider(provider?: BrowserProvider): BrowserProvider {
   if (provider === undefined || provider.kind === "managed") {
     return MANAGED_PROVIDER;
   }
+  if (provider.kind === "user") return { kind: "user" };
   let endpoint: URL;
   try {
     endpoint = new URL(provider.webSocketUrl);
@@ -22,7 +26,7 @@ export function normalizeBrowserProvider(provider?: BrowserProvider): BrowserPro
 }
 
 export function browserProviderKey(provider: BrowserProvider): string {
-  if (provider.kind === "managed") return provider.kind;
+  if (provider.kind !== "external") return provider.kind;
   return `external:${providerEndpointKey(provider)}`;
 }
 

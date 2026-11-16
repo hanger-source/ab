@@ -4,7 +4,7 @@ The default managed provider launches one dedicated headed Chrome with one fixed
 
 This is not the user's everyday Chrome profile. AB does not copy credentials from another browser or silently switch to a temporary profile.
 
-When the user explicitly asks to use an already-running Chrome, connect its exact browser-level DevTools endpoint with the external provider. AB then uses the login state already present in that Chrome. Listing tabs does not attach them; acquire only the exact tab required by the task. External disconnect detaches AB sessions without closing user tabs, signing out, or shutting down Chrome.
+When the user explicitly asks to use their running Chrome, call `connect({ provider: { kind: "user" }, timeoutMs: 60_000 })`. AB discovers that Chrome and requests its debugging connection; the user may need to allow the Chrome permission prompt. Do not ask for an endpoint or read protected profile files. AB then uses the login state already present in that Chrome. Listing tabs does not attach them; acquire only the exact tab required by the task. Disconnect detaches AB sessions without closing user tabs, signing out, or shutting down Chrome.
 
 ## Reuse an existing login
 

@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -25,12 +25,16 @@ await cp(resolve(sdkSource, "docs"), resolve(sdkDestination, "docs"), {
 for (const name of ["package.json", "README.md", "LICENSE"]) {
   await cp(resolve(sdkSource, name), resolve(sdkDestination, name), { force: true });
 }
-for (const name of ["bin", "package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]) {
+for (const name of ["package.json", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]) {
   await cp(resolve(nativeSource, name), resolve(nativeDestination, name), {
     recursive: true,
     force: true,
   });
 }
+await mkdir(resolve(nativeDestination, "bin"), { recursive: true });
+const stagedBinary = resolve(nativeDestination, "bin", `.ab-runtime-${process.pid}`);
+await cp(resolve(nativeSource, "bin/ab-runtime"), stagedBinary);
+await rename(stagedBinary, resolve(nativeDestination, "bin/ab-runtime"));
 
 const sdkPackage = JSON.parse(await readFile(resolve(sdkSource, "package.json"), "utf8"));
 const nativePackage = JSON.parse(await readFile(resolve(nativeSource, "package.json"), "utf8"));

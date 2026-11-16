@@ -20,11 +20,11 @@ const agent = await connect();
 let tabs = await agent.tabs.list();
 ```
 
-When the user explicitly selected their Chrome, pass the external provider in this first call and keep it for the whole JavaScript session:
+When the user explicitly selected their Chrome, pass the user provider in this first call and keep it for the whole JavaScript session:
 
 ```js
 const agent = await connect({
-  provider: { kind: "external", webSocketUrl },
+  provider: { kind: "user" }, timeoutMs: 60_000,
 });
 ```
 

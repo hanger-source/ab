@@ -11,6 +11,7 @@ connect(options?: {
   presenter?: Presenter;
   provider?:
     | { kind: "managed" }
+    | { kind: "user" }
     | { kind: "external"; webSocketUrl: string };
 }): Promise<Browser>
 
@@ -40,13 +41,14 @@ connect(options?: {
   signal?: AbortSignal;
   provider?:
     | { kind: "managed" }
+    | { kind: "user" }
     | { kind: "external"; webSocketUrl: string };
 }): Promise<Browser>
 ```
 
 Agent and Core use one transport and Rust runtime. `@hanger-source/ab/agent` is a typed facade, not a second browser implementation.
 
-The default `managed` provider owns AB's Chrome and fixed profile. The explicit `external` provider connects the supplied browser-level DevTools WebSocket endpoint, uses a separate runtime socket, and never falls back to managed Chrome. One JavaScript process must disconnect before selecting another provider.
+The default `managed` provider owns AB's Chrome and fixed profile. The `user` provider discovers the current user's regular Google Chrome on macOS and connects without an address; it never launches Chrome and uses a 60-second default connection deadline to allow for Chrome's approval prompt. The explicit `external` provider connects a supplied browser-level DevTools WebSocket endpoint. Both use an external runtime socket and never fall back to managed Chrome. One JavaScript process must disconnect before selecting another provider.
 
 ## Structured errors and traces
 

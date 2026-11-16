@@ -4,6 +4,8 @@ export function normalizeBrowserProvider(provider) {
     if (provider === undefined || provider.kind === "managed") {
         return MANAGED_PROVIDER;
     }
+    if (provider.kind === "user")
+        return { kind: "user" };
     let endpoint;
     try {
         endpoint = new URL(provider.webSocketUrl);
@@ -19,7 +21,7 @@ export function normalizeBrowserProvider(provider) {
     return { kind: "external", webSocketUrl: endpoint.href };
 }
 export function browserProviderKey(provider) {
-    if (provider.kind === "managed")
+    if (provider.kind !== "external")
         return provider.kind;
     return `external:${providerEndpointKey(provider)}`;
 }

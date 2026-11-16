@@ -1,0 +1,1 @@
+{"version":3,"file":"user-chrome.d.ts","sourceRoot":"","sources":["../../src/runtime/user-chrome.ts"],"names":[],"mappings":"AAIA,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,eAAe,CAAC;AACtD,OAAO,KAAK,EAAE,uBAAuB,EAAE,MAAM,eAAe,CAAC;AAM7D,uFAAuF;AACvF,wBAAsB,kBAAkB,CAAC,OAAO,GAAE,gBAAqB,GAAG,OAAO,CAAC,uBAAuB,CAAC,CAuDzG;AAsDD,uFAAuF;AACvF,wBAAgB,yBAAyB,CAAC,KAAK,EAAE,OAAO,GAAG,OAAO,CAWjE"}

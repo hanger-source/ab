@@ -26,7 +26,32 @@ AB intentionally has no start, stop, restart, daemon, status, or profile CLI. Th
 
 There is one AB-specific headed Chrome profile for the default managed provider. Cookies and storage survive Node sessions and Agent tasks. AB does not switch to a temporary profile when the fixed profile is unavailable.
 
-The external provider is an explicit alternative for an already-running Chrome whose remote debugging endpoint the user has enabled:
+## User's running Chrome
+
+For “connect to my Chrome”, select `user` before the first connection:
+
+```js
+const agent = await connect({ provider: { kind: "user" }, timeoutMs: 60_000 });
+```
+
+The SDK identifies the current user's regular Google Chrome process on macOS, excludes processes using custom user-data directories (including AB's managed profile), and discovers its loopback TCP listener. No profile file access, browser-id, copied login data, extension, or manually supplied address is required. Multiple candidate browsers or listening ports fail explicitly rather than selecting one arbitrarily. The `user` provider uses the external runtime and its target ownership rules; `identity.chrome.source` is `external`.
+
+Chrome 144+ supports enabling remote debugging in the existing browser at `chrome://inspect/#remote-debugging`. In approval mode, `/json/*` returns 404 by design and the browser WebSocket path is `/devtools/browser`, with no GUID. AB requests that connection once and Chrome displays the permission prompt. Tell the user to approve it; keep waiting on the original JavaScript cell. Do not create duplicate connection attempts while consent is pending. A conventional debugging server is identified by its `/json/version` browser endpoint instead.
+
+Use an outer Tool timeout of at least 90 seconds for the 60-second connection deadline. Connection errors are actionable:
+
+- `user_chrome_not_running`: ask the user to open their regular Chrome; AB does not launch it.
+- `user_chrome_debugging_disabled`: ask the user to enable the setting at `chrome://inspect/#remote-debugging`, then connect again.
+- `user_chrome_ambiguous`: report the ambiguity; do not choose another browser or port.
+- `user_chrome_discovery_failed`: report the local process/listener/discovery failure from the error.
+- `user_chrome_permission_denied`: Chrome rejected the request; the user must allow a subsequent request if they want to connect.
+- `user_chrome_connection_timeout`: check for the pending Chrome permission prompt; do not repeatedly reconnect.
+
+No `user` failure launches or falls back to managed Chrome. Do not restart the user's browser or request full disk access to repair this flow.
+
+## Explicit endpoint
+
+Use `external` when the caller supplies a specific local or remote browser-level WebSocket endpoint:
 
 ```js
 const agent = await connect({
@@ -37,7 +62,7 @@ const agent = await connect({
 });
 ```
 
-On macOS, Chrome writes the debugging port and browser WebSocket path as the two lines of `<user-data-dir>/DevToolsActivePort`. Use that exact endpoint. The external provider does not launch Chrome, copy a profile, attach all tabs, fall back to managed Chrome, or share the managed runtime socket.
+Use the endpoint supplied by the caller. The external provider does not launch Chrome, copy a profile, attach all tabs, fall back to managed Chrome, or share the managed runtime socket. Do not make an Agent discover or read `DevToolsActivePort` to fulfill a request for the user's regular Chrome; use `user` instead.
 
 ## Persistent JavaScript session
 

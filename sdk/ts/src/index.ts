@@ -5,6 +5,7 @@ import {
   normalizeBrowserProvider,
 } from "./runtime/provider.js";
 import type { ConnectOptions } from "./options.js";
+import { discoverUserChrome, userChromeConnectionError } from "./runtime/user-chrome.js";
 
 export { ABError, type ABErrorData } from "./errors/index.js";
 export {
@@ -152,7 +153,16 @@ export function connect(options: ConnectOptions = {}): Promise<Browser> {
   if (options.signal?.aborted) {
     return Promise.reject(new DOMException("AB connection was cancelled", "AbortError"));
   }
-  const connecting = ProtocolClient.connect(provider, options.timeoutMs, options.signal).then((client) => {
+  const timeoutMs = options.timeoutMs ?? (provider.kind === "user" ? 60_000 : 30_000);
+  const deadline = Date.now() + timeoutMs;
+  const resolved = provider.kind === "user"
+    ? discoverUserChrome({ timeoutMs: Math.min(timeoutMs, 5_000), ...(options.signal ? { signal: options.signal } : {}) })
+    : Promise.resolve(provider);
+  const connecting = resolved.then((selected) => ProtocolClient.connect(
+    selected, Math.max(1, deadline - Date.now()), options.signal,
+  )).catch((error: unknown) => {
+    throw provider.kind === "user" ? userChromeConnectionError(error) : error;
+  }).then((client) => {
     return new Browser(client, () => {
       if (currentBrowser === connecting) {
         currentBrowser = undefined;

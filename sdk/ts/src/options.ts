@@ -6,6 +6,7 @@ export type OperationOptions = {
 
 export type BrowserProvider =
   | { kind: "managed" }
+  | { kind: "user" }
   | { kind: "external"; webSocketUrl: string };
 
 export type ConnectOptions = OperationOptions & {

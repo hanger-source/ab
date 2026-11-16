@@ -1,4 +1,4 @@
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "./provider.js";
 export declare function runtimeDirectory(provider: BrowserProvider): string;
 export declare function socketPath(provider: BrowserProvider): string;
 export declare function startupPath(provider: BrowserProvider): string;

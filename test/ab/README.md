@@ -26,3 +26,13 @@ bun test/ab/live-suite.ts --case version-handover
 `version-handover` requires `AB_OLD_RUNTIME_BINARY` and `AB_OLD_BUILD_ID` so it can prove an actual old-to-current handover. A second copy of the current binary is not valid evidence.
 
 Passing this suite is runtime evidence only. It does not replace MiniWoB++, WebArena-Verified Hard, VisualWebArena, or the final unfamiliar-Agent-only-Skill acceptance.
+
+## Running personal Chrome
+
+This opt-in experiment uses the packaged Skill client and the current user's existing regular Google Chrome. It never launches Chrome and is separate from the isolated managed-browser suite:
+
+```bash
+bun run test:ab:user-chrome
+```
+
+Chrome may request remote-debugging permission. Allow the pending connection in Chrome. The experiment lists existing tabs without acquiring them, creates and closes one controlled check tab, verifies AX and a real button click, reconnects from a separate Node process, and checks that all original tabs and Chrome process identities survive. Set `AB_SKILL_CLIENT` to the absolute installed `scripts/ab-client.mjs` path to verify an installation instead of the repository package.

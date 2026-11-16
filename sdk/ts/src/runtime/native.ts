@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { dataDirectory, runtimeDirectory, startupPath } from "./paths.js";
 import type { ABErrorData } from "../errors/index.js";
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "./provider.js";
 
 const require = createRequire(import.meta.url);
 

@@ -44,6 +44,7 @@
     "test:runtime": "cargo test -p ab-runtime",
     "test:host": "cd host/node-repl && bun run test",
     "test:ab": "bun test/ab/live-suite.ts",
+    "test:ab:user-chrome": "AB_USER_CHROME_LIVE=1 node test/ab/user-chrome-live.mjs",
     "test:ab:dialog": "bun test/ab/live-suite.ts --case dialog",
     "test:ab:version-handover": "bun test/ab/live-suite.ts --case version-handover",
     "benchmark": "bun test/benchmarks/cli.ts",

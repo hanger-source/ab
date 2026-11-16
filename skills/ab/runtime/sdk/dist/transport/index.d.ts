@@ -1,5 +1,5 @@
 import { type ClientReady, type RequestTarget, type ResourceClosed, type ResourceEvent, type Stage } from "../protocol.js";
-import type { BrowserProvider } from "../options.js";
+import type { ResolvedBrowserProvider as BrowserProvider } from "../runtime/provider.js";
 type TraceFilter = {
     traceId?: string;
     requestId?: string;
